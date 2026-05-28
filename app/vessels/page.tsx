@@ -57,6 +57,7 @@ export default function VesselsPage() {
         .select(
           "id, publisher_id, transport_type, vessel_type, dwt, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, created_at"
         )
+        .eq("status", "published")
         .order("created_at", { ascending: false });
 
       if (error) {
