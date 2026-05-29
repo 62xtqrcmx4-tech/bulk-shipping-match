@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
-
-const DEMO_REQUESTER_ID = "00000000-0000-0000-0000-000000000002";
+import PageHeader from "../../components/PageHeader";
 
 type VesselSupply = {
   id: string;
@@ -35,6 +34,7 @@ function formatTransportType(type: string) {
 function formatStatus(status: string) {
   if (status === "pending") return "待审核";
   if (status === "published") return "可联系";
+  if (status === "completed") return "已完成";
   if (status === "closed") return "已关闭";
   if (status === "expired") return "已过期";
   if (status === "rejected") return "审核未通过";
@@ -46,6 +46,11 @@ export default function VesselsPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [contactingId, setContactingId] = useState<string | null>(null);
+
+  const [transportTypeFilter, setTransportTypeFilter] = useState("all");
+  const [vesselTypeKeyword, setVesselTypeKeyword] = useState("");
+  const [cargoKeyword, setCargoKeyword] = useState("");
+  const [areaKeyword, setAreaKeyword] = useState("");
 
   useEffect(() => {
     async function fetchVessels() {
@@ -63,7 +68,11 @@ export default function VesselsPage() {
       if (error) {
         setErrorMessage(error.message);
       } else {
-        setVesselList((data || []) as VesselSupply[]);
+        const publishedOnly = ((data || []) as VesselSupply[]).filter(
+          (item) => item.status === "published"
+        );
+
+        setVesselList(publishedOnly);
       }
 
       setLoading(false);
@@ -72,11 +81,69 @@ export default function VesselsPage() {
     fetchVessels();
   }, []);
 
+  const filteredVesselList = vesselList.filter((item) => {
+    const matchTransportType =
+      transportTypeFilter === "all"
+        ? true
+        : item.transport_type === transportTypeFilter;
+
+    const vesselText = vesselTypeKeyword.trim().toLowerCase();
+    const cargoText = cargoKeyword.trim().toLowerCase();
+    const areaText = areaKeyword.trim().toLowerCase();
+
+    const matchVesselType =
+      vesselText === ""
+        ? true
+        : item.vessel_type.toLowerCase().includes(vesselText);
+
+    const matchCargo =
+      cargoText === ""
+        ? true
+        : Array.isArray(item.acceptable_cargo_types)
+          ? item.acceptable_cargo_types
+              .join(" ")
+              .toLowerCase()
+              .includes(cargoText)
+          : false;
+
+    const matchArea =
+      areaText === ""
+        ? true
+        : [
+            item.current_port_or_area,
+            item.current_destination_port || "",
+            item.service_area,
+            item.regular_route || "",
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(areaText);
+
+    return matchTransportType && matchVesselType && matchCargo && matchArea;
+  });
+
   async function handleContact(item: VesselSupply) {
     setContactingId(item.id);
 
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+      setContactingId(null);
+      alert("请先登录后再申请联系。");
+      window.location.href = "/login";
+      return;
+    }
+
+    const currentUserId = userData.user.id;
+
+    if (currentUserId === item.publisher_id) {
+      setContactingId(null);
+      alert("不能申请联系自己发布的船源。");
+      return;
+    }
+
     const { error } = await supabase.from("contact_request").insert({
-      requester_id: DEMO_REQUESTER_ID,
+      requester_id: currentUserId,
       target_user_id: item.publisher_id,
       cargo_demand_id: null,
       vessel_supply_id: item.id,
@@ -95,47 +162,70 @@ export default function VesselsPage() {
       return;
     }
 
-    alert("联系申请已提交。当前测试版已生成联系记录。");
+    alert("联系申请已提交。");
+  }
+
+  function resetFilters() {
+    setTransportTypeFilter("all");
+    setVesselTypeKeyword("");
+    setCargoKeyword("");
+    setAreaKeyword("");
   }
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-7xl">
-        <a
-            href="/"
-            className="mb-6 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-        >
-            ← 返回首页
-        </a>
-        <div className="mb-8 flex items-end justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">船源大厅</h1>
-            <p className="mt-2 text-slate-500">
-              查看已提交的可用船舶与空档船期。当前为一期测试版，后续将增加审核与筛选功能。
-            </p>
-          </div>
-
-          <a
-            href="/publish-vessel"
-            className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800"
-          >
-            发布船源
-          </a>
-        </div>
+        <PageHeader
+          title="船源大厅"
+          description="查看已审核发布的可用船舶与空档船期。当前为一期测试版，后续将继续完善筛选、排序与联系方式开放机制。"
+          actionHref="/publish-vessel"
+          actionText="发布船源"
+        />
 
         <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-5">
-          <input className="rounded-xl border px-3 py-2" placeholder="船型" />
-          <input className="rounded-xl border px-3 py-2" placeholder="当前区域" />
-          <input className="rounded-xl border px-3 py-2" placeholder="可承运货种" />
-          <select className="rounded-xl border px-3 py-2">
-            <option>全部类型</option>
-            <option>内贸</option>
-            <option>外贸</option>
-            <option>均可</option>
+          <select
+            value={transportTypeFilter}
+            onChange={(event) => setTransportTypeFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部运输类型</option>
+            <option value="domestic">内贸</option>
+            <option value="international">外贸</option>
+            <option value="both">均可</option>
           </select>
-          <button className="rounded-xl bg-slate-900 px-4 py-2 text-white">
-            筛选
+
+          <input
+            value={vesselTypeKeyword}
+            onChange={(event) => setVesselTypeKeyword(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+            placeholder="搜索船型"
+          />
+
+          <input
+            value={cargoKeyword}
+            onChange={(event) => setCargoKeyword(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+            placeholder="搜索可承运货种"
+          />
+
+          <input
+            value={areaKeyword}
+            onChange={(event) => setAreaKeyword(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+            placeholder="搜索区域、港口、航线"
+          />
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-white"
+          >
+            重置筛选
           </button>
+        </div>
+
+        <div className="mb-4 text-sm text-slate-500">
+          共 {vesselList.length} 条船源，当前显示 {filteredVesselList.length} 条。
         </div>
 
         {loading ? (
@@ -148,11 +238,15 @@ export default function VesselsPage() {
           </div>
         ) : vesselList.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            暂无船源数据。你可以先发布一条测试船源。
+            暂无已审核通过的船源数据。你可以先发布一条测试船源，并在后台审核通过。
+          </div>
+        ) : filteredVesselList.length === 0 ? (
+          <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
+            没有符合筛选条件的船源。
           </div>
         ) : (
           <div className="grid gap-5">
-            {vesselList.map((item) => (
+            {filteredVesselList.map((item) => (
               <div
                 key={item.id}
                 className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
