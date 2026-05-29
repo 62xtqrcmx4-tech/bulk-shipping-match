@@ -21,11 +21,37 @@ export default function RegisterPage() {
     const companyType = String(formData.get("company_type"));
     const contactName = String(formData.get("contact_name"));
     const contactPhone = String(formData.get("contact_phone"));
-    const contactEmail = email;
     const unifiedSocialCreditCode = String(
       formData.get("unified_social_credit_code") || ""
     );
     const mainBusiness = String(formData.get("main_business") || "");
+
+    const licenseFile = formData.get("business_license") as File | null;
+
+    if (!licenseFile || licenseFile.size === 0) {
+      alert("请上传营业执照或相关企业资质文件。");
+      setLoading(false);
+      return;
+    }
+
+    if (licenseFile.size > 10 * 1024 * 1024) {
+      alert("营业执照文件不能超过 10MB。");
+      setLoading(false);
+      return;
+    }
+
+    const allowedTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ];
+
+    if (!allowedTypes.includes(licenseFile.type)) {
+      alert("营业执照仅支持 JPG、PNG、WEBP 或 PDF 文件。");
+      setLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -46,6 +72,22 @@ export default function RegisterPage() {
       return;
     }
 
+    const fileExt = licenseFile.name.split(".").pop() || "file";
+    const filePath = `${userId}/${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("business-licenses")
+      .upload(filePath, licenseFile, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      setLoading(false);
+      alert(`用户已注册，但营业执照上传失败：${uploadError.message}`);
+      return;
+    }
+
     const { error: profileError } = await supabase
       .from("company_verification")
       .insert({
@@ -56,19 +98,21 @@ export default function RegisterPage() {
         company_type: companyType,
         contact_name: contactName,
         contact_phone: contactPhone,
-        contact_email: contactEmail,
+        contact_email: email,
         main_business: mainBusiness,
+        business_license_path: filePath,
+        business_license_uploaded_at: new Date().toISOString(),
         verification_status: "pending",
       });
 
     setLoading(false);
 
     if (profileError) {
-      alert(`用户已注册，但企业资料保存失败：${profileError.message}`);
+      alert(`用户已注册，营业执照已上传，但企业资料保存失败：${profileError.message}`);
       return;
     }
 
-    alert("注册成功，企业资料已提交审核。请登录。");
+    alert("注册成功，企业资料和营业执照已提交审核。请登录。");
     window.location.href = "/login";
   }
 
@@ -77,7 +121,7 @@ export default function RegisterPage() {
       <div className="mx-auto max-w-4xl">
         <PageHeader
           title="注册账号"
-          description="请填写账号和企业认证基础信息。当前为一期测试版，注册后企业资料进入待审核状态。"
+          description="请填写账号、企业基础信息并上传营业执照。注册后企业资料进入待审核状态。"
         />
       </div>
 
@@ -181,6 +225,20 @@ export default function RegisterPage() {
               />
             </label>
           </div>
+
+          <label className="grid gap-2">
+            <span className="font-medium">营业执照 / 企业资质文件</span>
+            <input
+              name="business_license"
+              required
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp,.pdf"
+              className="rounded-xl border bg-white px-3 py-3"
+            />
+            <span className="text-sm text-slate-500">
+              支持 JPG、PNG、WEBP、PDF，文件大小不超过 10MB。该文件用于平台审核和交易方资质查询。
+            </span>
+          </label>
 
           <label className="grid gap-2">
             <span className="font-medium">主营业务，可选</span>
