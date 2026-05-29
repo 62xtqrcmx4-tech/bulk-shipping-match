@@ -362,7 +362,7 @@ export default function MyCargoPage() {
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             className="rounded-xl border px-3 py-2"
-            placeholder="搜索货种、港口、船型"
+            placeholder="关键词搜索"
           />
 
           <button
