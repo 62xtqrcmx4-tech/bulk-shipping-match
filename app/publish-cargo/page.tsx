@@ -13,6 +13,16 @@ export default function PublishCargoPage() {
     setLoading(true);
 
     const formData = new FormData(event.currentTarget);
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+    alert("请先登录后再发布货源。");
+    setLoading(false);
+    window.location.href = "/login";
+    return;
+    }
+
+    const currentUserId = userData.user.id;
 
     const transportTypeText = String(formData.get("transport_type"));
     const transportType =
@@ -27,7 +37,7 @@ export default function PublishCargoPage() {
     }
 
     const payload = {
-      publisher_id: DEMO_USER_ID,
+      publisher_id: currentUserId,
       transport_type: transportType,
       cargo_type: String(formData.get("cargo_type")),
       cargo_quantity: cargoQuantity,
