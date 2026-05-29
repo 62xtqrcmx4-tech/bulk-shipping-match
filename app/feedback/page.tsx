@@ -2,8 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
-
-const DEMO_FEEDBACK_USER_ID = "00000000-0000-0000-0000-000000000002";
+import PageHeader from "../../components/PageHeader";
 
 type ContactRequest = {
   id: string;
@@ -22,9 +21,18 @@ function formatRequestType(type: string) {
   return type;
 }
 
+function formatStatus(status: string) {
+  if (status === "opened") return "已开放联系方式";
+  if (status === "contacted") return "已联系";
+  if (status === "feedback_submitted") return "已反馈";
+  if (status === "closed") return "已关闭";
+  return status;
+}
+
 export default function FeedbackPage() {
   const [contacts, setContacts] = useState<ContactRequest[]>([]);
   const [selectedContactId, setSelectedContactId] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,19 +40,46 @@ export default function FeedbackPage() {
     async function fetchContacts() {
       setLoading(true);
 
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError || !userData.user) {
+        alert("请先登录后再填写反馈。");
+        window.location.href = "/login";
+        return;
+      }
+
+      const userId = userData.user.id;
+      setCurrentUserId(userId);
+
       const { data, error } = await supabase
         .from("contact_request")
         .select(
           "id, requester_id, target_user_id, cargo_demand_id, vessel_supply_id, request_type, status, created_at"
         )
+        .or(`requester_id.eq.${userId},target_user_id.eq.${userId}`)
         .order("created_at", { ascending: false });
 
       if (error) {
         alert(`读取联系记录失败：${error.message}`);
-      } else {
-        setContacts((data || []) as ContactRequest[]);
+        setLoading(false);
+        return;
       }
 
+      const allContacts = (data || []) as ContactRequest[];
+
+      const cargoSideCanEvaluate = allContacts.filter((item) => {
+        if (item.request_type === "cargo_to_vessel") {
+          return item.requester_id === userId;
+        }
+
+        if (item.request_type === "vessel_to_cargo") {
+          return item.target_user_id === userId;
+        }
+
+        return false;
+      });
+
+      setContacts(cargoSideCanEvaluate);
       setLoading(false);
     }
 
@@ -54,6 +89,12 @@ export default function FeedbackPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!currentUserId) {
+      alert("请先登录后再提交反馈。");
+      window.location.href = "/login";
+      return;
+    }
+
     if (!selectedContactId) {
       alert("请选择一条联系记录");
       return;
@@ -62,11 +103,26 @@ export default function FeedbackPage() {
     setSubmitting(true);
 
     const formData = new FormData(event.currentTarget);
-
     const selectedContact = contacts.find((item) => item.id === selectedContactId);
 
     if (!selectedContact) {
       alert("未找到对应联系记录");
+      setSubmitting(false);
+      return;
+    }
+
+    let vesselSideUserId = "";
+
+    if (selectedContact.request_type === "cargo_to_vessel") {
+      vesselSideUserId = selectedContact.target_user_id;
+    }
+
+    if (selectedContact.request_type === "vessel_to_cargo") {
+      vesselSideUserId = selectedContact.requester_id;
+    }
+
+    if (!vesselSideUserId) {
+      alert("无法识别被评价的船方用户。");
       setSubmitting(false);
       return;
     }
@@ -79,8 +135,8 @@ export default function FeedbackPage() {
 
     const payload = {
       contact_request_id: selectedContactId,
-      feedback_user_id: DEMO_FEEDBACK_USER_ID,
-      target_user_id: selectedContact.target_user_id,
+      feedback_user_id: currentUserId,
+      target_user_id: vesselSideUserId,
       contacted,
       responded,
       quoted,
@@ -114,31 +170,36 @@ export default function FeedbackPage() {
 
     event.currentTarget.reset();
     setSelectedContactId("");
+
+    setContacts((prev) =>
+      prev.map((item) =>
+        item.id === selectedContactId
+          ? { ...item, status: "feedback_submitted" }
+          : item
+      )
+    );
   }
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
-        <div className="mx-auto mb-6 max-w-4xl">
-            <a
-                href="/"
-                className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-                ← 返回首页
-            </a>
-        </div>
-      <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
-        
-        <h1 className="text-3xl font-bold">填写联系反馈</h1>
-        <p className="mt-2 text-slate-500">
-          用于记录联系后是否响应、是否报价、是否成交。当前为一期测试版。
-        </p>
+      <div className="mx-auto max-w-4xl">
+        <PageHeader
+          title="评价船方"
+          description="仅货源方可对船方响应、报价和成交情况进行反馈，用于沉淀船方服务质量与平台撮合效果。"
+        />
+      </div>
 
+      <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
         {loading ? (
-          <div className="mt-8 rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
-            正在读取联系记录...
+          <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
+            正在读取可评价记录...
+          </div>
+        ) : contacts.length === 0 ? (
+          <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
+            暂无可评价的船方联系记录。货源方在联系船源后，可在此填写反馈。
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="mt-8 grid gap-6">
+          <form onSubmit={handleSubmit} className="grid gap-6">
             <label className="grid gap-2">
               <span className="font-medium">选择联系记录</span>
               <select
@@ -150,8 +211,9 @@ export default function FeedbackPage() {
                 <option value="">请选择</option>
                 {contacts.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {formatRequestType(item.request_type)}｜{item.id.slice(0, 8)}｜状态：
-                    {item.status}
+                    {formatRequestType(item.request_type)}｜
+                    {item.id.slice(0, 8)}｜
+                    状态：{formatStatus(item.status)}
                   </option>
                 ))}
               </select>
@@ -167,7 +229,7 @@ export default function FeedbackPage() {
               </label>
 
               <label className="grid gap-2">
-                <span className="font-medium">对方是否响应</span>
+                <span className="font-medium">船方是否响应</span>
                 <select name="responded" required className="rounded-xl border px-3 py-3">
                   <option value="yes">是</option>
                   <option value="no">否</option>
@@ -177,7 +239,7 @@ export default function FeedbackPage() {
 
             <div className="grid gap-5 md:grid-cols-2">
               <label className="grid gap-2">
-                <span className="font-medium">是否报价</span>
+                <span className="font-medium">船方是否报价</span>
                 <select name="quoted" className="rounded-xl border px-3 py-3">
                   <option value="yes">是</option>
                   <option value="no">否</option>
@@ -198,12 +260,12 @@ export default function FeedbackPage() {
               <input
                 name="no_deal_reason"
                 className="rounded-xl border px-3 py-3"
-                placeholder="例如：价格不合适、船期不匹配、未响应等"
+                placeholder="例如：价格不合适、船期不匹配、船方未响应等"
               />
             </label>
 
             <label className="grid gap-2">
-              <span className="font-medium">整体评价，1–5 分</span>
+              <span className="font-medium">船方整体评价，1–5 分</span>
               <select name="overall_rating" className="rounded-xl border px-3 py-3">
                 <option value="">暂不评价</option>
                 <option value="5">5 分，非常好</option>
@@ -219,7 +281,7 @@ export default function FeedbackPage() {
               <textarea
                 name="comment"
                 className="min-h-28 rounded-xl border px-3 py-3"
-                placeholder="可填写联系过程、报价情况、成交情况等"
+                placeholder="可填写船方响应速度、报价情况、沟通情况、成交情况等"
               />
             </label>
 
@@ -228,7 +290,7 @@ export default function FeedbackPage() {
               disabled={submitting}
               className="rounded-xl bg-blue-700 px-6 py-3 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              {submitting ? "提交中..." : "提交反馈"}
+              {submitting ? "提交中..." : "提交船方评价"}
             </button>
           </form>
         )}
