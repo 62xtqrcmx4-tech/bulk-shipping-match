@@ -96,6 +96,12 @@ export default function CargoPage() {
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-7xl">
+        <a
+            href="/"
+            className="mb-6 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+            ← 返回首页
+        </a>
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-bold">货源大厅</h1>
