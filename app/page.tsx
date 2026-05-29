@@ -85,7 +85,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
           <a href="/" className="block">
             <h1 className="text-2xl font-bold tracking-tight">
-              DMU干散货船货匹配平台
+              DMU船货匹配平台
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               Bulk Shipping Match Platform
@@ -108,6 +108,9 @@ export default function Home() {
             <a href="/my-cargo" className="hover:text-slate-950">
               我的货源
             </a>
+            <a href="/my-vessels" className="hover:text-slate-950">
+              我的船源
+            </a>
             <a href="/contacts" className="hover:text-slate-950">
               联系记录
             </a>
@@ -129,7 +132,7 @@ export default function Home() {
           </h2>
 
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            平台面向铁矿石、煤炭、粮食、建材等大宗散货运输需求，
+            平台
             为货主、贸易商、船东、船代、航运企业和物流服务商提供货源发布、
             船源发布、供需检索、自动开放联系方式与反馈记录服务。
           </p>
@@ -282,7 +285,7 @@ export default function Home() {
 
       <footer className="border-t bg-white">
         <div className="mx-auto max-w-7xl px-6 py-6 text-sm text-slate-500">
-          © 2026 大宗散货船货撮合平台 · 一期试运营版本 · 大连海事大学智慧港航与物流工程研究中心
+          © 2026 船货匹配平台 · 一期试运营版本 · 大连海事大学智慧港航与物流工程研究中心
         </div>
       </footer>
     </main>
