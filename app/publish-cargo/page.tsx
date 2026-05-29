@@ -61,6 +61,14 @@ export default function PublishCargoPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
+        <div className="mx-auto mb-6 max-w-4xl">
+            <a
+                href="/"
+                className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+                ← 返回首页
+            </a>
+        </div>
       <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
         <h1 className="text-3xl font-bold">发布货源</h1>
         <p className="mt-2 text-slate-500">
