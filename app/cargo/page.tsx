@@ -17,6 +17,7 @@ type CargoDemand = {
   expected_vessel_type: string;
   information_expiry_date: string;
   status: string;
+  remark: string | null;
   created_at: string;
 };
 
@@ -36,6 +37,14 @@ function formatStatus(status: string) {
   return status;
 }
 
+function formatCargoUnit(unit: string) {
+  if (unit === "ton") return "吨";
+  if (unit === "teu") return "TEU";
+  if (unit === "cbm") return "立方米";
+  if (unit === "piece") return "件";
+  return unit;
+}
+
 export default function CargoPage() {
   const [cargoList, setCargoList] = useState<CargoDemand[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +54,8 @@ export default function CargoPage() {
   const [transportTypeFilter, setTransportTypeFilter] = useState("all");
   const [cargoTypeFilter, setCargoTypeFilter] = useState("all");
   const [keyword, setKeyword] = useState("");
+  const [minQuantity, setMinQuantity] = useState("");
+  const [maxQuantity, setMaxQuantity] = useState("");
 
   useEffect(() => {
     async function fetchCargo() {
@@ -54,7 +65,7 @@ export default function CargoPage() {
       const { data, error } = await supabase
         .from("cargo_demand")
         .select(
-          "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, created_at"
+          "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, remark, created_at"
         )
         .eq("status", "published")
         .order("created_at", { ascending: false });
@@ -94,12 +105,35 @@ export default function CargoPage() {
             item.loading_port,
             item.discharge_port,
             item.expected_vessel_type,
+            item.remark || "",
           ]
             .join(" ")
             .toLowerCase()
             .includes(keywordText);
 
-    return matchTransportType && matchCargoType && matchKeyword;
+    const minQuantityValue =
+      minQuantity.trim() === "" ? null : Number(minQuantity);
+
+    const maxQuantityValue =
+      maxQuantity.trim() === "" ? null : Number(maxQuantity);
+
+    const matchMinQuantity =
+      minQuantityValue === null ||
+      Number.isNaN(minQuantityValue) ||
+      item.cargo_quantity >= minQuantityValue;
+
+    const matchMaxQuantity =
+      maxQuantityValue === null ||
+      Number.isNaN(maxQuantityValue) ||
+      item.cargo_quantity <= maxQuantityValue;
+
+    return (
+      matchTransportType &&
+      matchCargoType &&
+      matchKeyword &&
+      matchMinQuantity &&
+      matchMaxQuantity
+    );
   });
 
   async function handleContact(item: CargoDemand) {
@@ -149,6 +183,8 @@ export default function CargoPage() {
     setTransportTypeFilter("all");
     setCargoTypeFilter("all");
     setKeyword("");
+    setMinQuantity("");
+    setMaxQuantity("");
   }
 
   return (
@@ -156,12 +192,12 @@ export default function CargoPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="货源大厅"
-          description="查看已审核发布的大宗散货运输需求。当前为一期测试版，后续将继续完善筛选、排序与联系方式开放机制。"
+          description="查看已审核发布的大宗散货、集装箱货物及特种货运输需求。支持按货种、港口、船型、备注和货量区间筛选。"
           actionHref="/publish-cargo"
           actionText="发布货源"
         />
 
-        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-4">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-6">
           <select
             value={transportTypeFilter}
             onChange={(event) => setTransportTypeFilter(event.target.value)}
@@ -182,14 +218,37 @@ export default function CargoPage() {
             <option value="煤炭">煤炭</option>
             <option value="粮食">粮食</option>
             <option value="建材">建材</option>
+            <option value="集装箱货物">集装箱货物</option>
+            <option value="特种货物">特种货物</option>
+            <option value="重大件">重大件</option>
             <option value="其他">其他</option>
           </select>
+
+          <input
+            value={minQuantity}
+            onChange={(event) => setMinQuantity(event.target.value)}
+            type="number"
+            min="0"
+            step="0.01"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最小货量"
+          />
+
+          <input
+            value={maxQuantity}
+            onChange={(event) => setMaxQuantity(event.target.value)}
+            type="number"
+            min="0"
+            step="0.01"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最大货量"
+          />
 
           <input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             className="rounded-xl border px-3 py-2"
-            placeholder="搜索货种、港口、船型"
+            placeholder="关键词搜索"
           />
 
           <button
@@ -203,6 +262,9 @@ export default function CargoPage() {
 
         <div className="mb-4 text-sm text-slate-500">
           共 {cargoList.length} 条货源，当前显示 {filteredCargoList.length} 条。
+          <span className="ml-2">
+            货量区间按各货源自身单位筛选，请结合单位查看。
+          </span>
         </div>
 
         {loading ? (
@@ -258,13 +320,19 @@ export default function CargoPage() {
 
                 <div className="mt-5 grid gap-3 text-sm text-slate-600 md:grid-cols-4">
                   <p>
-                    货量：{item.cargo_quantity}{" "}
-                    {item.cargo_unit === "ton" ? "吨" : item.cargo_unit}
+                    货量：{item.cargo_quantity} {formatCargoUnit(item.cargo_unit)}
                   </p>
                   <p>计划装货：{item.planned_loading_date}</p>
                   <p>期望船型：{item.expected_vessel_type}</p>
                   <p>有效期至：{item.information_expiry_date}</p>
                 </div>
+
+                {item.remark ? (
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                    <span className="font-medium text-slate-800">备注：</span>
+                    {item.remark}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
