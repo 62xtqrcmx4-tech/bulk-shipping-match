@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-const DEMO_USER_ID = "00000000-0000-0000-0000-000000000001";
+
 
 export default function PublishVesselPage() {
   const [loading, setLoading] = useState(false);
@@ -13,6 +13,16 @@ export default function PublishVesselPage() {
     setLoading(true);
 
     const formData = new FormData(event.currentTarget);
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+    alert("请先登录后再发布船源。");
+    setLoading(false);
+    window.location.href = "/login";
+    return;
+    }
+
+    const currentUserId = userData.user.id;
 
     const transportTypeText = String(formData.get("transport_type"));
     const transportType =
@@ -46,7 +56,7 @@ export default function PublishVesselPage() {
     }
 
     const payload = {
-      publisher_id: DEMO_USER_ID,
+      publisher_id: currentUserId,
       transport_type: transportType,
       vessel_name: String(formData.get("vessel_name") || ""),
       mmsi: String(formData.get("mmsi") || ""),
