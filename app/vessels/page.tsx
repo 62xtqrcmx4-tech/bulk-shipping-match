@@ -10,6 +10,7 @@ type VesselSupply = {
   transport_type: string;
   vessel_type: string;
   dwt: number;
+  capacity_unit: string | null;
   current_port_or_area: string;
   current_destination_port: string | null;
   available_start_date: string;
@@ -21,6 +22,7 @@ type VesselSupply = {
   acceptable_cargo_types: string[];
   information_expiry_date: string;
   status: string;
+  remark: string | null;
   created_at: string;
 };
 
@@ -41,6 +43,13 @@ function formatStatus(status: string) {
   return status;
 }
 
+function formatCapacityUnit(unit: string | null) {
+  if (!unit) return "DWT";
+  if (unit === "piece") return "件";
+  if (unit === "other") return "其他";
+  return unit;
+}
+
 export default function VesselsPage() {
   const [vesselList, setVesselList] = useState<VesselSupply[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +57,9 @@ export default function VesselsPage() {
   const [contactingId, setContactingId] = useState<string | null>(null);
 
   const [transportTypeFilter, setTransportTypeFilter] = useState("all");
+  const [capacityUnitFilter, setCapacityUnitFilter] = useState("all");
+  const [minCapacity, setMinCapacity] = useState("");
+  const [maxCapacity, setMaxCapacity] = useState("");
   const [vesselTypeKeyword, setVesselTypeKeyword] = useState("");
   const [cargoKeyword, setCargoKeyword] = useState("");
   const [areaKeyword, setAreaKeyword] = useState("");
@@ -60,7 +72,7 @@ export default function VesselsPage() {
       const { data, error } = await supabase
         .from("vessel_supply")
         .select(
-          "id, publisher_id, transport_type, vessel_type, dwt, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, created_at"
+          "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
         )
         .eq("status", "published")
         .order("created_at", { ascending: false });
@@ -86,6 +98,29 @@ export default function VesselsPage() {
       transportTypeFilter === "all"
         ? true
         : item.transport_type === transportTypeFilter;
+
+    const currentCapacityUnit = item.capacity_unit || "DWT";
+
+    const matchCapacityUnit =
+      capacityUnitFilter === "all"
+        ? true
+        : currentCapacityUnit === capacityUnitFilter;
+
+    const minCapacityValue =
+      minCapacity.trim() === "" ? null : Number(minCapacity);
+
+    const maxCapacityValue =
+      maxCapacity.trim() === "" ? null : Number(maxCapacity);
+
+    const matchMinCapacity =
+      minCapacityValue === null ||
+      Number.isNaN(minCapacityValue) ||
+      item.dwt >= minCapacityValue;
+
+    const matchMaxCapacity =
+      maxCapacityValue === null ||
+      Number.isNaN(maxCapacityValue) ||
+      item.dwt <= maxCapacityValue;
 
     const vesselText = vesselTypeKeyword.trim().toLowerCase();
     const cargoText = cargoKeyword.trim().toLowerCase();
@@ -114,12 +149,21 @@ export default function VesselsPage() {
             item.current_destination_port || "",
             item.service_area,
             item.regular_route || "",
+            item.remark || "",
           ]
             .join(" ")
             .toLowerCase()
             .includes(areaText);
 
-    return matchTransportType && matchVesselType && matchCargo && matchArea;
+    return (
+      matchTransportType &&
+      matchCapacityUnit &&
+      matchMinCapacity &&
+      matchMaxCapacity &&
+      matchVesselType &&
+      matchCargo &&
+      matchArea
+    );
   });
 
   async function handleContact(item: VesselSupply) {
@@ -167,6 +211,9 @@ export default function VesselsPage() {
 
   function resetFilters() {
     setTransportTypeFilter("all");
+    setCapacityUnitFilter("all");
+    setMinCapacity("");
+    setMaxCapacity("");
     setVesselTypeKeyword("");
     setCargoKeyword("");
     setAreaKeyword("");
@@ -177,12 +224,12 @@ export default function VesselsPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="船源大厅"
-          description="查看已审核发布的可用船舶与空档船期。当前为一期测试版，后续将继续完善筛选、排序与联系方式开放机制。"
+          description="查看已审核发布的可用船舶与空档船期。支持按船型、可承运货种、区域、备注和运力区间筛选。"
           actionHref="/publish-vessel"
           actionText="发布船源"
         />
 
-        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-5">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-7">
           <select
             value={transportTypeFilter}
             onChange={(event) => setTransportTypeFilter(event.target.value)}
@@ -193,6 +240,39 @@ export default function VesselsPage() {
             <option value="international">外贸</option>
             <option value="both">均可</option>
           </select>
+
+          <select
+            value={capacityUnitFilter}
+            onChange={(event) => setCapacityUnitFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部运力单位</option>
+            <option value="DWT">DWT</option>
+            <option value="TEU">TEU</option>
+            <option value="CBM">CBM</option>
+            <option value="piece">件</option>
+            <option value="other">其他</option>
+          </select>
+
+          <input
+            value={minCapacity}
+            onChange={(event) => setMinCapacity(event.target.value)}
+            type="number"
+            min="0"
+            step="1"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最小运力"
+          />
+
+          <input
+            value={maxCapacity}
+            onChange={(event) => setMaxCapacity(event.target.value)}
+            type="number"
+            min="0"
+            step="1"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最大运力"
+          />
 
           <input
             value={vesselTypeKeyword}
@@ -205,27 +285,32 @@ export default function VesselsPage() {
             value={cargoKeyword}
             onChange={(event) => setCargoKeyword(event.target.value)}
             className="rounded-xl border px-3 py-2"
-            placeholder="搜索可承运货种"
+            placeholder="搜索货种"
           />
 
           <input
             value={areaKeyword}
             onChange={(event) => setAreaKeyword(event.target.value)}
             className="rounded-xl border px-3 py-2"
-            placeholder="搜索区域、港口、航线"
+            placeholder="关键词搜索"
           />
+        </div>
+
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-slate-500">
+            共 {vesselList.length} 条船源，当前显示 {filteredVesselList.length} 条。
+            <span className="ml-2">
+              运力区间会结合所选运力单位筛选，建议先选择 DWT 或 TEU。
+            </span>
+          </div>
 
           <button
             type="button"
             onClick={resetFilters}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-white"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white"
           >
             重置筛选
           </button>
-        </div>
-
-        <div className="mb-4 text-sm text-slate-500">
-          共 {vesselList.length} 条船源，当前显示 {filteredVesselList.length} 条。
         </div>
 
         {loading ? (
@@ -295,7 +380,9 @@ export default function VesselsPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 text-sm text-slate-600 md:grid-cols-4">
-                  <p>载重吨：{item.dwt} DWT</p>
+                  <p>
+                    运力规模：{item.dwt} {formatCapacityUnit(item.capacity_unit)}
+                  </p>
                   <p>可用开始：{item.available_start_date}</p>
                   <p>
                     可承运：
@@ -310,6 +397,13 @@ export default function VesselsPage() {
                   <p>服务区域：{item.service_area}</p>
                   <p>常跑航线：{item.regular_route || "未填写"}</p>
                 </div>
+
+                {item.remark ? (
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                    <span className="font-medium text-slate-800">备注：</span>
+                    {item.remark}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
