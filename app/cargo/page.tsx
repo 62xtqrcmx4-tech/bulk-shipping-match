@@ -118,6 +118,8 @@ export default function CargoPage() {
 
   const [transportTypeFilter, setTransportTypeFilter] = useState("all");
   const [cargoTypeFilter, setCargoTypeFilter] = useState("all");
+  const [publisherVerificationFilter, setPublisherVerificationFilter] =
+    useState("all");
   const [minQuantity, setMinQuantity] = useState("");
   const [maxQuantity, setMaxQuantity] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -236,6 +238,7 @@ export default function CargoPage() {
   }, [
     transportTypeFilter,
     cargoTypeFilter,
+    publisherVerificationFilter,
     minQuantity,
     maxQuantity,
     keyword,
@@ -250,6 +253,15 @@ export default function CargoPage() {
 
     const matchCargoType =
       cargoTypeFilter === "all" ? true : item.cargo_type === cargoTypeFilter;
+
+    const currentPublisherStatus = item.publisher_verification_status || "";
+
+    const matchPublisherVerification =
+      publisherVerificationFilter === "all"
+        ? true
+        : publisherVerificationFilter === "unverified"
+          ? currentPublisherStatus === ""
+          : currentPublisherStatus === publisherVerificationFilter;
 
     const minQuantityValue =
       minQuantity.trim() === "" ? null : Number(minQuantity);
@@ -283,6 +295,7 @@ export default function CargoPage() {
     return (
       matchTransportType &&
       matchCargoType &&
+      matchPublisherVerification &&
       matchMinQuantity &&
       matchMaxQuantity &&
       matchSearch
@@ -301,6 +314,7 @@ export default function CargoPage() {
   function resetFilters() {
     setTransportTypeFilter("all");
     setCargoTypeFilter("all");
+    setPublisherVerificationFilter("all");
     setMinQuantity("");
     setMaxQuantity("");
     setKeyword("");
@@ -402,12 +416,12 @@ export default function CargoPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="货源大厅"
-          description="浏览已审核发布的货源信息。可按货种、运输类型、货量区间、港口、备注关键词进行筛选。"
+          description="浏览已审核发布的货源信息。可按货种、运输类型、货量区间、发布方认证状态、港口和备注关键词进行筛选。"
           actionHref="/publish-cargo"
           actionText="发布货源"
         />
 
-        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-7">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-8">
           <select
             value={transportTypeFilter}
             onChange={(event) => setTransportTypeFilter(event.target.value)}
@@ -433,6 +447,20 @@ export default function CargoPage() {
             <option value="特种货物">特种货物</option>
             <option value="重大件">重大件</option>
             <option value="其他">其他</option>
+          </select>
+
+          <select
+            value={publisherVerificationFilter}
+            onChange={(event) =>
+              setPublisherVerificationFilter(event.target.value)
+            }
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部认证状态</option>
+            <option value="approved">已认证发布方</option>
+            <option value="pending">待审核发布方</option>
+            <option value="rejected">认证驳回发布方</option>
+            <option value="unverified">未认证发布方</option>
           </select>
 
           <input
