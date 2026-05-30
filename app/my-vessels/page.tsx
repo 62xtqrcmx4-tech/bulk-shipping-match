@@ -101,6 +101,9 @@ export default function MyVesselsPage() {
   const [maxCapacity, setMaxCapacity] = useState("");
   const [keyword, setKeyword] = useState("");
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   async function fetchMyVessels() {
     setLoading(true);
 
@@ -211,6 +214,18 @@ export default function MyVesselsPage() {
     fetchMyVessels();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    statusFilter,
+    transportTypeFilter,
+    capacityUnitFilter,
+    minCapacity,
+    maxCapacity,
+    keyword,
+    pageSize,
+  ]);
+
   const filteredVesselList = vesselList.filter((item) => {
     const contacts = item.contacts || [];
 
@@ -289,6 +304,18 @@ export default function MyVesselsPage() {
     );
   });
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredVesselList.length / pageSize)
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedVesselList = filteredVesselList.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize
+  );
+
   async function closeVessel(vesselId: string) {
     const confirmed = window.confirm("确认关闭该船源吗？关闭后前台将不再展示。");
 
@@ -322,6 +349,7 @@ export default function MyVesselsPage() {
     setMinCapacity("");
     setMaxCapacity("");
     setKeyword("");
+    setCurrentPage(1);
   }
 
   function getContactDisplayName(contact: ContactRequest) {
@@ -415,7 +443,8 @@ export default function MyVesselsPage() {
         </div>
 
         <div className="mb-4 text-sm text-slate-500">
-          共 {vesselList.length} 条船源，当前显示 {filteredVesselList.length} 条。
+          共 {vesselList.length} 条船源，筛选后 {filteredVesselList.length} 条，
+          当前第 {safeCurrentPage} / {totalPages} 页。
         </div>
 
         {loading ? (
@@ -431,146 +460,196 @@ export default function MyVesselsPage() {
             没有符合筛选条件的船源。
           </div>
         ) : (
-          <div className="grid gap-6">
-            {filteredVesselList.map((item) => {
-              const contacts = item.contacts || [];
+          <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div className="grid gap-6">
+              {paginatedVesselList.map((item) => {
+                const contacts = item.contacts || [];
 
-              return (
-                <div
-                  key={item.id}
-                  className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h2 className="text-xl font-bold">{item.vessel_type}</h2>
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200 p-5"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h2 className="text-xl font-bold">
+                            {item.vessel_type}
+                          </h2>
 
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                          {formatTransportType(item.transport_type)}
-                        </span>
-
-                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                          {formatStatus(item.status)}
-                        </span>
-
-                        {item.is_ballast_return ? (
-                          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                            返程空载
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                            {formatTransportType(item.transport_type)}
                           </span>
-                        ) : null}
 
-                        {item.is_idle_slot ? (
-                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
-                            空档船期
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                            {formatStatus(item.status)}
                           </span>
-                        ) : null}
-                      </div>
 
-                      <p className="mt-2 text-slate-600">
-                        当前港/区域：{item.current_port_or_area}
-                        {item.current_destination_port
-                          ? `；当前目的港：${item.current_destination_port}`
-                          : ""}
-                      </p>
+                          {item.is_ballast_return ? (
+                            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                              返程空载
+                            </span>
+                          ) : null}
 
-                      <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
-                        <p>
-                          运力规模：{item.dwt}{" "}
-                          {formatCapacityUnit(item.capacity_unit)}
-                        </p>
-                        <p>可用开始：{item.available_start_date}</p>
-                        <p>有效期至：{item.information_expiry_date}</p>
-                        <p>
-                          可承运：
-                          {Array.isArray(item.acceptable_cargo_types)
-                            ? item.acceptable_cargo_types.join("、")
+                          {item.is_idle_slot ? (
+                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+                              空档船期
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <p className="mt-2 text-slate-600">
+                          当前港/区域：{item.current_port_or_area}
+                          {item.current_destination_port
+                            ? `；当前目的港：${item.current_destination_port}`
                             : ""}
                         </p>
-                      </div>
 
-                      <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                        <p>服务区域：{item.service_area}</p>
-                        <p>常跑航线：{item.regular_route || "未填写"}</p>
-                      </div>
-
-                      {item.status === "rejected" && item.rejected_reason ? (
-                        <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
-                          <span className="font-semibold">审核未通过原因：</span>
-                          {item.rejected_reason}
+                        <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
+                          <p>
+                            运力规模：{item.dwt}{" "}
+                            {formatCapacityUnit(item.capacity_unit)}
+                          </p>
+                          <p>可用开始：{item.available_start_date}</p>
+                          <p>有效期至：{item.information_expiry_date}</p>
+                          <p>
+                            可承运：
+                            {Array.isArray(item.acceptable_cargo_types)
+                              ? item.acceptable_cargo_types.join("、")
+                              : ""}
+                          </p>
                         </div>
-                      ) : null}
 
-                      {item.remark ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <span className="font-medium text-slate-800">
-                            备注：
-                          </span>
-                          {item.remark}
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                          <p>服务区域：{item.service_area}</p>
+                          <p>常跑航线：{item.regular_route || "未填写"}</p>
                         </div>
-                      ) : null}
-                    </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => closeVessel(item.id)}
-                        disabled={
-                          updatingId === item.id || item.status === "closed"
-                        }
-                        className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-                      >
-                        关闭船源
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 border-t pt-5">
-                    <h3 className="font-bold">联系过该船源的货方</h3>
-
-                    {contacts.length === 0 ? (
-                      <p className="mt-3 text-sm text-slate-500">
-                        暂无货方联系该船源。
-                      </p>
-                    ) : (
-                      <div className="mt-3 grid gap-3">
-                        {contacts.map((contact) => (
-                          <div
-                            key={contact.id}
-                            className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
-                          >
-                            <p className="font-medium">
-                              {getContactDisplayName(contact)}
-                            </p>
-
-                            <div className="mt-2 grid gap-1 text-slate-500 md:grid-cols-2">
-                              <p>
-                                联系电话：
-                                {contact.requester_contact_phone || "未填写"}
-                              </p>
-                              <p>
-                                联系邮箱：
-                                {contact.requester_contact_email || "未填写"}
-                              </p>
-                              <p>
-                                联系类型：
-                                {formatContactType(contact.request_type)}
-                              </p>
-                              <p>
-                                申请时间：{formatDate(contact.created_at)}
-                              </p>
-                              <p>
-                                开放时间：
-                                {formatDate(contact.contact_opened_at)}
-                              </p>
-                            </div>
+                        {item.status === "rejected" &&
+                        item.rejected_reason ? (
+                          <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
+                            <span className="font-semibold">
+                              审核未通过原因：
+                            </span>
+                            {item.rejected_reason}
                           </div>
-                        ))}
+                        ) : null}
+
+                        {item.remark ? (
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <span className="font-medium text-slate-800">
+                              备注：
+                            </span>
+                            {item.remark}
+                          </div>
+                        ) : null}
                       </div>
-                    )}
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => closeVessel(item.id)}
+                          disabled={
+                            updatingId === item.id || item.status === "closed"
+                          }
+                          className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                        >
+                          关闭船源
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 border-t pt-5">
+                      <h3 className="font-bold">联系过该船源的货方</h3>
+
+                      {contacts.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-500">
+                          暂无货方联系该船源。
+                        </p>
+                      ) : (
+                        <div className="mt-3 grid gap-3">
+                          {contacts.map((contact) => (
+                            <div
+                              key={contact.id}
+                              className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
+                            >
+                              <p className="font-medium">
+                                {getContactDisplayName(contact)}
+                              </p>
+
+                              <div className="mt-2 grid gap-1 text-slate-500 md:grid-cols-2">
+                                <p>
+                                  联系电话：
+                                  {contact.requester_contact_phone || "未填写"}
+                                </p>
+                                <p>
+                                  联系邮箱：
+                                  {contact.requester_contact_email || "未填写"}
+                                </p>
+                                <p>
+                                  联系类型：
+                                  {formatContactType(contact.request_type)}
+                                </p>
+                                <p>
+                                  申请时间：{formatDate(contact.created_at)}
+                                </p>
+                                <p>
+                                  开放时间：
+                                  {formatDate(contact.contact_opened_at)}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>每页显示</span>
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value))}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value={10}>10 条</option>
+                  <option value={20}>20 条</option>
+                  <option value={50}>50 条</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(1, prev - 1))
+                  }
+                  disabled={safeCurrentPage <= 1}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  上一页
+                </button>
+
+                <span className="text-sm text-slate-600">
+                  第 {safeCurrentPage} / {totalPages} 页
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                  }
+                  disabled={safeCurrentPage >= totalPages}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </section>
         )}
       </div>
     </main>
