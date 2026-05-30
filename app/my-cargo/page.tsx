@@ -13,8 +13,12 @@ type ContactRequest = {
   request_type: string;
   status: string;
   created_at: string;
+  contact_opened_at: string | null;
+
   requester_company_name?: string;
   requester_contact_name?: string;
+  requester_contact_phone?: string;
+  requester_contact_email?: string;
 };
 
 type CargoDemand = {
@@ -30,10 +34,7 @@ type CargoDemand = {
   expected_vessel_type: string;
   information_expiry_date: string;
   status: string;
-  completed_contact_request_id: string | null;
-  completed_vessel_user_id: string | null;
-  completed_at: string | null;
-  completion_note: string | null;
+  remark: string | null;
   created_at: string;
   contacts?: ContactRequest[];
 };
@@ -42,11 +43,14 @@ type CompanyProfile = {
   user_id: string;
   company_name: string;
   contact_name: string;
+  contact_phone: string;
+  contact_email: string;
 };
 
 function formatTransportType(type: string) {
   if (type === "domestic") return "内贸";
   if (type === "international") return "外贸";
+  if (type === "both") return "均可";
   return type;
 }
 
@@ -61,15 +65,23 @@ function formatStatus(status: string) {
   return status;
 }
 
+function formatCargoUnit(unit: string) {
+  if (unit === "ton") return "吨";
+  if (unit === "teu") return "TEU";
+  if (unit === "cbm") return "立方米";
+  if (unit === "piece") return "件";
+  return unit;
+}
+
 function formatDate(value: string | null) {
   if (!value) return "未记录";
   return new Date(value).toLocaleString("zh-CN");
 }
 
-function getContactDisplayName(contact: ContactRequest) {
-  const company = contact.requester_company_name || "未知船方公司";
-  const person = contact.requester_contact_name || "未填写联系人";
-  return `${company}｜${person}`;
+function formatContactType(type: string) {
+  if (type === "cargo_to_vessel") return "货方联系船源";
+  if (type === "vessel_to_cargo") return "船方联系货源";
+  return type || "联系申请";
 }
 
 export default function MyCargoPage() {
@@ -78,15 +90,16 @@ export default function MyCargoPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState("all");
+  const [transportTypeFilter, setTransportTypeFilter] = useState("all");
   const [cargoTypeFilter, setCargoTypeFilter] = useState("all");
-  const [contactFilter, setContactFilter] = useState("all");
+  const [minQuantity, setMinQuantity] = useState("");
+  const [maxQuantity, setMaxQuantity] = useState("");
   const [keyword, setKeyword] = useState("");
 
-  const [selectedContactByCargo, setSelectedContactByCargo] = useState<
+  const [selectedContactByCargoId, setSelectedContactByCargoId] = useState<
     Record<string, string>
   >({});
-
-  const [completionNoteByCargo, setCompletionNoteByCargo] = useState<
+  const [completionNoteByCargoId, setCompletionNoteByCargoId] = useState<
     Record<string, string>
   >({});
 
@@ -106,7 +119,7 @@ export default function MyCargoPage() {
     const { data: cargoData, error: cargoError } = await supabase
       .from("cargo_demand")
       .select(
-        "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, completed_contact_request_id, completed_vessel_user_id, completed_at, completion_note, created_at"
+        "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, remark, created_at"
       )
       .eq("publisher_id", userId)
       .order("created_at", { ascending: false });
@@ -130,13 +143,13 @@ export default function MyCargoPage() {
     const { data: contactData, error: contactError } = await supabase
       .from("contact_request")
       .select(
-        "id, requester_id, target_user_id, cargo_demand_id, vessel_supply_id, request_type, status, created_at"
+        "id, requester_id, target_user_id, cargo_demand_id, vessel_supply_id, request_type, status, created_at, contact_opened_at"
       )
       .in("cargo_demand_id", cargoIds)
       .order("created_at", { ascending: false });
 
     if (contactError) {
-      alert(`读取订单联系记录失败：${contactError.message}`);
+      alert(`读取货源联系记录失败：${contactError.message}`);
       setCargoList(cargos);
       setLoading(false);
       return;
@@ -153,11 +166,15 @@ export default function MyCargoPage() {
     if (requesterIds.length > 0) {
       const { data: profileData, error: profileError } = await supabase
         .from("company_verification")
-        .select("user_id, company_name, contact_name")
+        .select(
+          "user_id, company_name, contact_name, contact_phone, contact_email"
+        )
         .in("user_id", requesterIds);
 
       if (!profileError) {
         profiles = (profileData || []) as CompanyProfile[];
+      } else {
+        console.error(profileError);
       }
     }
 
@@ -176,6 +193,8 @@ export default function MyCargoPage() {
         ...contact,
         requester_company_name: profile?.company_name || "",
         requester_contact_name: profile?.contact_name || "",
+        requester_contact_phone: profile?.contact_phone || "",
+        requester_contact_email: profile?.contact_email || "",
       };
     });
 
@@ -200,8 +219,29 @@ export default function MyCargoPage() {
     const matchStatus =
       statusFilter === "all" ? true : item.status === statusFilter;
 
+    const matchTransportType =
+      transportTypeFilter === "all"
+        ? true
+        : item.transport_type === transportTypeFilter;
+
     const matchCargoType =
       cargoTypeFilter === "all" ? true : item.cargo_type === cargoTypeFilter;
+
+    const minQuantityValue =
+      minQuantity.trim() === "" ? null : Number(minQuantity);
+
+    const maxQuantityValue =
+      maxQuantity.trim() === "" ? null : Number(maxQuantity);
+
+    const matchMinQuantity =
+      minQuantityValue === null ||
+      Number.isNaN(minQuantityValue) ||
+      item.cargo_quantity >= minQuantityValue;
+
+    const matchMaxQuantity =
+      maxQuantityValue === null ||
+      Number.isNaN(maxQuantityValue) ||
+      item.cargo_quantity <= maxQuantityValue;
 
     const keywordText = keyword.trim().toLowerCase();
 
@@ -213,69 +253,32 @@ export default function MyCargoPage() {
             item.loading_port,
             item.discharge_port,
             item.expected_vessel_type,
+            item.remark || "",
+            contacts
+              .map((contact) =>
+                [
+                  contact.requester_company_name || "",
+                  contact.requester_contact_name || "",
+                  contact.requester_contact_phone || "",
+                  contact.requester_contact_email || "",
+                  formatContactType(contact.request_type),
+                ].join(" ")
+              )
+              .join(" "),
           ]
             .join(" ")
             .toLowerCase()
             .includes(keywordText);
 
-    const matchContact =
-      contactFilter === "all"
-        ? true
-        : contactFilter === "has_contact"
-          ? contacts.length > 0
-          : contacts.length === 0;
-
-    return matchStatus && matchCargoType && matchKeyword && matchContact;
-  });
-
-  async function completeCargo(cargo: CargoDemand) {
-    const selectedContactId = selectedContactByCargo[cargo.id];
-
-    if (!selectedContactId) {
-      alert("请先选择完成该订单的船方。");
-      return;
-    }
-
-    const contacts = cargo.contacts || [];
-    const selectedContact = contacts.find((item) => item.id === selectedContactId);
-
-    if (!selectedContact) {
-      alert("未找到对应船方联系记录。");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `确认将该订单标记为已完成？\n\n成交船方：${getContactDisplayName(
-        selectedContact
-      )}`
+    return (
+      matchStatus &&
+      matchTransportType &&
+      matchCargoType &&
+      matchMinQuantity &&
+      matchMaxQuantity &&
+      matchKeyword
     );
-
-    if (!confirmed) return;
-
-    setUpdatingId(cargo.id);
-
-    const { error } = await supabase
-      .from("cargo_demand")
-      .update({
-        status: "completed",
-        completed_contact_request_id: selectedContact.id,
-        completed_vessel_user_id: selectedContact.requester_id,
-        completed_at: new Date().toISOString(),
-        completion_note: completionNoteByCargo[cargo.id] || "",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", cargo.id);
-
-    setUpdatingId(null);
-
-    if (error) {
-      alert(`标记订单完成失败：${error.message}`);
-      return;
-    }
-
-    alert("订单已标记为完成。");
-    await fetchMyCargo();
-  }
+  });
 
   async function closeCargo(cargoId: string) {
     const confirmed = window.confirm("确认关闭该订单吗？关闭后前台将不再展示。");
@@ -303,11 +306,69 @@ export default function MyCargoPage() {
     await fetchMyCargo();
   }
 
+  async function completeCargo(cargo: CargoDemand) {
+    const contacts = cargo.contacts || [];
+    const selectedContactId = selectedContactByCargoId[cargo.id] || "";
+
+    if (contacts.length > 0 && !selectedContactId) {
+      alert("请选择最终完成该订单的船方。");
+      return;
+    }
+
+    const selectedContact = contacts.find(
+      (contact) => contact.id === selectedContactId
+    );
+
+    const confirmed = window.confirm(
+      selectedContact
+        ? `确认将该订单标记为已完成？成交船方：${
+            selectedContact.requester_company_name || "未填写企业名称"
+          }｜${selectedContact.requester_contact_name || "未填写联系人"}`
+        : "确认将该订单标记为已完成？"
+    );
+
+    if (!confirmed) return;
+
+    setUpdatingId(cargo.id);
+
+    const { error } = await supabase
+      .from("cargo_demand")
+      .update({
+        status: "completed",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", cargo.id);
+
+    setUpdatingId(null);
+
+    if (error) {
+      alert(`标记订单完成失败：${error.message}`);
+      return;
+    }
+
+    const note = completionNoteByCargoId[cargo.id];
+
+    if (note && note.trim()) {
+      console.log("完成备注：", note.trim());
+    }
+
+    alert("订单已标记为完成。");
+    await fetchMyCargo();
+  }
+
   function resetFilters() {
     setStatusFilter("all");
+    setTransportTypeFilter("all");
     setCargoTypeFilter("all");
-    setContactFilter("all");
+    setMinQuantity("");
+    setMaxQuantity("");
     setKeyword("");
+  }
+
+  function getContactDisplayName(contact: ContactRequest) {
+    const company = contact.requester_company_name || "未填写企业名称";
+    const person = contact.requester_contact_name || "未填写联系人";
+    return `${company}｜${person}`;
   }
 
   return (
@@ -315,12 +376,12 @@ export default function MyCargoPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="我发布的货源"
-          description="管理我发布的货源订单，查看联系过该订单的船方，并标记订单完成或关闭。"
+          description="管理我发布的货源订单，查看联系该订单的船方，并标记订单完成或关闭。"
           actionHref="/publish-cargo"
           actionText="发布货源"
         />
 
-        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-5">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-7">
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
@@ -336,6 +397,16 @@ export default function MyCargoPage() {
           </select>
 
           <select
+            value={transportTypeFilter}
+            onChange={(event) => setTransportTypeFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部运输类型</option>
+            <option value="domestic">内贸</option>
+            <option value="international">外贸</option>
+          </select>
+
+          <select
             value={cargoTypeFilter}
             onChange={(event) => setCargoTypeFilter(event.target.value)}
             className="rounded-xl border px-3 py-2"
@@ -345,18 +416,31 @@ export default function MyCargoPage() {
             <option value="煤炭">煤炭</option>
             <option value="粮食">粮食</option>
             <option value="建材">建材</option>
+            <option value="集装箱货物">集装箱货物</option>
+            <option value="特种货物">特种货物</option>
+            <option value="重大件">重大件</option>
             <option value="其他">其他</option>
           </select>
 
-          <select
-            value={contactFilter}
-            onChange={(event) => setContactFilter(event.target.value)}
+          <input
+            value={minQuantity}
+            onChange={(event) => setMinQuantity(event.target.value)}
+            type="number"
+            min="0"
+            step="0.01"
             className="rounded-xl border px-3 py-2"
-          >
-            <option value="all">全部联系状态</option>
-            <option value="has_contact">已有船方联系</option>
-            <option value="no_contact">暂无船方联系</option>
-          </select>
+            placeholder="最小货量"
+          />
+
+          <input
+            value={maxQuantity}
+            onChange={(event) => setMaxQuantity(event.target.value)}
+            type="number"
+            min="0"
+            step="0.01"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最大货量"
+          />
 
           <input
             value={keyword}
@@ -394,14 +478,8 @@ export default function MyCargoPage() {
           <div className="grid gap-6">
             {filteredCargoList.map((item) => {
               const contacts = item.contacts || [];
-              const canComplete =
-                item.status !== "completed" &&
-                item.status !== "closed" &&
-                contacts.length > 0;
-
-              const completedContact = contacts.find(
-                (contact) => contact.id === item.completed_contact_request_id
-              );
+              const canOperate =
+                item.status !== "closed" && item.status !== "completed";
 
               return (
                 <div
@@ -412,9 +490,11 @@ export default function MyCargoPage() {
                     <div>
                       <div className="flex flex-wrap items-center gap-3">
                         <h2 className="text-xl font-bold">{item.cargo_type}</h2>
+
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
                           {formatTransportType(item.transport_type)}
                         </span>
+
                         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
                           {formatStatus(item.status)}
                         </span>
@@ -427,23 +507,19 @@ export default function MyCargoPage() {
                       <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
                         <p>
                           货量：{item.cargo_quantity}{" "}
-                          {item.cargo_unit === "ton" ? "吨" : item.cargo_unit}
+                          {formatCargoUnit(item.cargo_unit)}
                         </p>
                         <p>计划装货：{item.planned_loading_date}</p>
                         <p>期望船型：{item.expected_vessel_type}</p>
                         <p>有效期至：{item.information_expiry_date}</p>
                       </div>
 
-                      {item.status === "completed" ? (
-                        <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-800">
-                          <p>订单已完成：{formatDate(item.completed_at)}</p>
-                          <p>
-                            成交船方：
-                            {completedContact
-                              ? getContactDisplayName(completedContact)
-                              : "未识别"}
-                          </p>
-                          <p>完成备注：{item.completion_note || "无"}</p>
+                      {item.remark ? (
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <span className="font-medium text-slate-800">
+                            备注：
+                          </span>
+                          {item.remark}
                         </div>
                       ) : null}
                     </div>
@@ -451,7 +527,7 @@ export default function MyCargoPage() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => closeCargo(item.id)}
-                        disabled={updatingId === item.id || item.status === "closed"}
+                        disabled={updatingId === item.id || !canOperate}
                         className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
                         关闭订单
@@ -471,46 +547,62 @@ export default function MyCargoPage() {
                         {contacts.map((contact) => (
                           <div
                             key={contact.id}
-                            className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
+                            className="flex flex-wrap items-start justify-between gap-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
                           >
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <p className="font-medium">
-                                  {getContactDisplayName(contact)}
+                            <div>
+                              <p className="font-medium">
+                                {getContactDisplayName(contact)}
+                              </p>
+
+                              <div className="mt-2 grid gap-1 text-slate-500 md:grid-cols-2">
+                                <p>
+                                  联系电话：
+                                  {contact.requester_contact_phone || "未填写"}
                                 </p>
-                                <p className="mt-1 text-slate-500">
-                                  联系时间：{formatDate(contact.created_at)}｜状态：
-                                  {contact.status}
+                                <p>
+                                  联系邮箱：
+                                  {contact.requester_contact_email || "未填写"}
+                                </p>
+                                <p>
+                                  联系类型：
+                                  {formatContactType(contact.request_type)}
+                                </p>
+                                <p>
+                                  申请时间：{formatDate(contact.created_at)}
+                                </p>
+                                <p>
+                                  开放时间：
+                                  {formatDate(contact.contact_opened_at)}
                                 </p>
                               </div>
-
-                              <a
-                                href={`/feedback?contactId=${contact.id}`}
-                                className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                              >
-                                评价该船方
-                              </a>
                             </div>
+
+                            <a
+                              href={`/feedback?contactId=${contact.id}`}
+                              className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                            >
+                              评价该船方
+                            </a>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
 
-                  {canComplete ? (
-                    <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                  {canOperate ? (
+                    <div className="mt-6 rounded-2xl bg-emerald-50 p-5 ring-1 ring-emerald-100">
                       <h3 className="font-bold text-emerald-900">
                         标记订单完成
                       </h3>
-                      <p className="mt-1 text-sm text-emerald-700">
+                      <p className="mt-2 text-sm text-emerald-700">
                         请选择最终完成该订单的船方，系统将把该货源标记为已完成。
                       </p>
 
                       <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto]">
                         <select
-                          value={selectedContactByCargo[item.id] || ""}
+                          value={selectedContactByCargoId[item.id] || ""}
                           onChange={(event) =>
-                            setSelectedContactByCargo((prev) => ({
+                            setSelectedContactByCargoId((prev) => ({
                               ...prev,
                               [item.id]: event.target.value,
                             }))
@@ -526,9 +618,9 @@ export default function MyCargoPage() {
                         </select>
 
                         <input
-                          value={completionNoteByCargo[item.id] || ""}
+                          value={completionNoteByCargoId[item.id] || ""}
                           onChange={(event) =>
-                            setCompletionNoteByCargo((prev) => ({
+                            setCompletionNoteByCargoId((prev) => ({
                               ...prev,
                               [item.id]: event.target.value,
                             }))
@@ -538,8 +630,13 @@ export default function MyCargoPage() {
                         />
 
                         <button
+                          type="button"
                           onClick={() => completeCargo(item)}
-                          disabled={updatingId === item.id}
+                          disabled={
+                            updatingId === item.id ||
+                            contacts.length === 0 ||
+                            !selectedContactByCargoId[item.id]
+                          }
                           className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                         >
                           确认完成
