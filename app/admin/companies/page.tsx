@@ -63,6 +63,9 @@ export default function AdminCompaniesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [keyword, setKeyword] = useState("");
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const [loading, setLoading] = useState(true);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -133,6 +136,10 @@ export default function AdminCompaniesPage() {
     initPage();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [keyword, statusFilter, pageSize]);
+
   const filteredCompanyList = companyList.filter((item) => {
     const matchStatus =
       statusFilter === "all"
@@ -157,6 +164,18 @@ export default function AdminCompaniesPage() {
 
     return matchStatus && matchSearch;
   });
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredCompanyList.length / pageSize)
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedCompanyList = filteredCompanyList.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize
+  );
 
   async function viewBusinessLicense(path: string | null) {
     if (!path) {
@@ -292,6 +311,7 @@ export default function AdminCompaniesPage() {
             onClick={() => {
               setKeyword("");
               setStatusFilter("all");
+              setCurrentPage(1);
             }}
             className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
           >
@@ -315,8 +335,9 @@ export default function AdminCompaniesPage() {
             <div className="mb-5">
               <h2 className="text-2xl font-bold">企业认证列表</h2>
               <p className="mt-1 text-sm text-slate-500">
-                共 {companyList.length} 条企业认证记录，当前显示{" "}
-                {filteredCompanyList.length} 条
+                共 {companyList.length} 条企业认证记录，筛选后{" "}
+                {filteredCompanyList.length} 条，当前第 {safeCurrentPage} /{" "}
+                {totalPages} 页
               </p>
             </div>
 
@@ -325,108 +346,159 @@ export default function AdminCompaniesPage() {
                 暂无符合条件的企业认证数据
               </div>
             ) : (
-              <div className="grid gap-4">
-                {filteredCompanyList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200 p-5"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h3 className="text-lg font-bold">
-                            {item.company_name}
-                          </h3>
+              <>
+                <div className="grid gap-4">
+                  {paginatedCompanyList.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200 p-5"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <h3 className="text-lg font-bold">
+                              {item.company_name}
+                            </h3>
 
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                            {formatUserType(item.user_type)}
-                          </span>
-
-                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                            {formatVerificationStatus(item.verification_status)}
-                          </span>
-
-                          {item.is_admin ? (
-                            <span className="rounded-full bg-purple-50 px-3 py-1 text-xs text-purple-700">
-                              管理员
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                              {formatUserType(item.user_type)}
                             </span>
+
+                            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                              {formatVerificationStatus(
+                                item.verification_status
+                              )}
+                            </span>
+
+                            {item.is_admin ? (
+                              <span className="rounded-full bg-purple-50 px-3 py-1 text-xs text-purple-700">
+                                管理员
+                              </span>
+                            ) : null}
+
+                            {item.business_license_path ? (
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+                                已上传证照
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                                未上传证照
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
+                            <p>企业类型：{item.company_type}</p>
+                            <p>联系人：{item.contact_name}</p>
+                            <p>联系电话：{item.contact_phone}</p>
+                            <p>联系邮箱：{item.contact_email}</p>
+                            <p>
+                              统一社会信用代码：
+                              {item.unified_social_credit_code || "未填写"}
+                            </p>
+                            <p>提交时间：{formatDate(item.created_at)}</p>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                            <p>主营业务：{item.main_business || "未填写"}</p>
+                            <p>
+                              证照上传时间：
+                              {formatDate(item.business_license_uploaded_at)}
+                            </p>
+                          </div>
+
+                          {item.verified_at ? (
+                            <div className="mt-3 rounded-2xl bg-emerald-50 p-3 text-sm text-emerald-700">
+                              认证通过时间：{formatDate(item.verified_at)}
+                            </div>
                           ) : null}
 
-                          {item.business_license_path ? (
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
-                              已上传证照
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                              未上传证照
-                            </span>
-                          )}
+                          {item.rejected_reason ? (
+                            <div className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700">
+                              驳回原因：{item.rejected_reason}
+                            </div>
+                          ) : null}
                         </div>
 
-                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
-                          <p>企业类型：{item.company_type}</p>
-                          <p>联系人：{item.contact_name}</p>
-                          <p>联系电话：{item.contact_phone}</p>
-                          <p>联系邮箱：{item.contact_email}</p>
-                          <p>
-                            统一社会信用代码：
-                            {item.unified_social_credit_code || "未填写"}
-                          </p>
-                          <p>提交时间：{formatDate(item.created_at)}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              viewBusinessLicense(item.business_license_path)
+                            }
+                            disabled={!item.business_license_path}
+                            className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+                          >
+                            查看证照
+                          </button>
+
+                          <button
+                            onClick={() => approveCompany(item.id)}
+                            disabled={updatingId === item.id}
+                            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-400"
+                          >
+                            认证通过
+                          </button>
+
+                          <button
+                            onClick={() => rejectCompany(item.id)}
+                            disabled={updatingId === item.id}
+                            className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:bg-slate-400"
+                          >
+                            认证驳回
+                          </button>
                         </div>
-
-                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                          <p>主营业务：{item.main_business || "未填写"}</p>
-                          <p>
-                            证照上传时间：
-                            {formatDate(item.business_license_uploaded_at)}
-                          </p>
-                        </div>
-
-                        {item.verified_at ? (
-                          <div className="mt-3 rounded-2xl bg-emerald-50 p-3 text-sm text-emerald-700">
-                            认证通过时间：{formatDate(item.verified_at)}
-                          </div>
-                        ) : null}
-
-                        {item.rejected_reason ? (
-                          <div className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700">
-                            驳回原因：{item.rejected_reason}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() =>
-                            viewBusinessLicense(item.business_license_path)
-                          }
-                          disabled={!item.business_license_path}
-                          className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
-                        >
-                          查看证照
-                        </button>
-
-                        <button
-                          onClick={() => approveCompany(item.id)}
-                          disabled={updatingId === item.id}
-                          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-400"
-                        >
-                          认证通过
-                        </button>
-
-                        <button
-                          onClick={() => rejectCompany(item.id)}
-                          disabled={updatingId === item.id}
-                          className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:bg-slate-400"
-                        >
-                          认证驳回
-                        </button>
                       </div>
                     </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <span>每页显示</span>
+                    <select
+                      value={pageSize}
+                      onChange={(event) =>
+                        setPageSize(Number(event.target.value))
+                      }
+                      className="rounded-xl border bg-white px-3 py-2 text-sm"
+                    >
+                      <option value={10}>10 条</option>
+                      <option value={20}>20 条</option>
+                      <option value={50}>50 条</option>
+                    </select>
                   </div>
-                ))}
-              </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(1, prev - 1))
+                      }
+                      disabled={safeCurrentPage <= 1}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      上一页
+                    </button>
+
+                    <span className="text-sm text-slate-600">
+                      第 {safeCurrentPage} / {totalPages} 页
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((prev) =>
+                          Math.min(totalPages, prev + 1)
+                        )
+                      }
+                      disabled={safeCurrentPage >= totalPages}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </section>
         )}
