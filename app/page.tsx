@@ -111,6 +111,9 @@ export default function Home() {
             <a href="/my-vessels" className="hover:text-slate-950">
               我的船源
             </a>
+            <a href="/my-profile" className="hover:text-slate-950">
+              我的资料
+            </a>
             <a href="/contacts" className="hover:text-slate-950">
               联系记录
             </a>
