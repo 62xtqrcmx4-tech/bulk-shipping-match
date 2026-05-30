@@ -38,6 +38,8 @@ type CompanyProfile = {
 };
 
 type CurrentUserProfile = {
+  user_id: string;
+  company_name: string;
   verification_status: string;
   business_license_path: string | null;
   rejected_reason: string | null;
@@ -57,6 +59,7 @@ function formatStatus(status: string) {
   if (status === "closed") return "已关闭";
   if (status === "expired") return "已过期";
   if (status === "rejected") return "审核未通过";
+  if (status === "draft") return "草稿";
   return status;
 }
 
@@ -67,137 +70,197 @@ function formatCapacityUnit(unit: string | null) {
   return unit;
 }
 
-function formatVerificationStatus(status?: string, licensePath?: string | null) {
+function formatVerificationStatus(status?: string) {
   if (status === "approved") return "已认证";
-  if (status === "pending" && licensePath) return "证照已提交，待审核";
+  if (status === "pending") return "证照已提交，待审核";
   if (status === "rejected") return "认证驳回";
-  if (licensePath) return "证照已提交";
   return "未认证";
 }
 
 function getVerificationBadgeClass(status?: string) {
   if (status === "approved") {
-    return "rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700";
+    return "rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700";
   }
 
   if (status === "pending") {
-    return "rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700";
+    return "rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700";
   }
 
   if (status === "rejected") {
-    return "rounded-full bg-red-50 px-3 py-1 text-xs text-red-700";
+    return "rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-700";
   }
 
-  return "rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600";
+  return "rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600";
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "未记录";
+  return new Date(value).toLocaleDateString("zh-CN");
+}
+
+function matchKeyword(
+  keyword: string,
+  values: Array<string | number | null | undefined>
+) {
+  const text = keyword.trim().toLowerCase();
+
+  if (text === "") return true;
+
+  return values
+    .map((value) => String(value || ""))
+    .join(" ")
+    .toLowerCase()
+    .includes(text);
 }
 
 export default function VesselsPage() {
   const [vesselList, setVesselList] = useState<VesselSupply[]>([]);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [contactingId, setContactingId] = useState<string | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [currentUserProfile, setCurrentUserProfile] =
+    useState<CurrentUserProfile | null>(null);
 
   const [transportTypeFilter, setTransportTypeFilter] = useState("all");
+  const [vesselTypeFilter, setVesselTypeFilter] = useState("all");
   const [capacityUnitFilter, setCapacityUnitFilter] = useState("all");
   const [minCapacity, setMinCapacity] = useState("");
   const [maxCapacity, setMaxCapacity] = useState("");
-  const [vesselTypeKeyword, setVesselTypeKeyword] = useState("");
-  const [cargoKeyword, setCargoKeyword] = useState("");
-  const [areaKeyword, setAreaKeyword] = useState("");
+  const [keyword, setKeyword] = useState("");
 
-  useEffect(() => {
-    async function fetchVessels() {
-      setLoading(true);
-      setErrorMessage("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-      const { data: userData } = await supabase.auth.getUser();
-      const loggedIn = !!userData.user;
-      setIsLoggedIn(loggedIn);
+  async function fetchCurrentUserProfile() {
+    const { data: userData } = await supabase.auth.getUser();
 
-      const { data, error } = await supabase
-        .from("vessel_supply")
-        .select(
-          "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
-        )
-        .eq("status", "published")
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        setErrorMessage(error.message);
-        setLoading(false);
-        return;
-      }
-
-      const publishedOnly = ((data || []) as VesselSupply[]).filter(
-        (item) => item.status === "published"
-      );
-
-      if (publishedOnly.length === 0) {
-        setVesselList([]);
-        setLoading(false);
-        return;
-      }
-
-      if (!loggedIn) {
-        setVesselList(publishedOnly);
-        setLoading(false);
-        return;
-      }
-
-      const publisherIds = Array.from(
-        new Set(publishedOnly.map((item) => item.publisher_id).filter(Boolean))
-      );
-
-      let profiles: CompanyProfile[] = [];
-
-      if (publisherIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase
-          .from("company_verification")
-          .select(
-            "user_id, company_name, verification_status, business_license_path"
-          )
-          .in("user_id", publisherIds);
-
-        if (profileError) {
-          console.error(profileError);
-        } else {
-          profiles = (profileData || []) as CompanyProfile[];
-        }
-      }
-
-      const profileMap = new Map<string, CompanyProfile>();
-
-      profiles.forEach((profile) => {
-        if (!profileMap.has(profile.user_id)) {
-          profileMap.set(profile.user_id, profile);
-        }
-      });
-
-      const merged = publishedOnly.map((vessel) => {
-        const profile = profileMap.get(vessel.publisher_id);
-
-        return {
-          ...vessel,
-          publisher_company_name: profile?.company_name || "未公开企业名称",
-          publisher_verification_status: profile?.verification_status || "",
-          publisher_business_license_path:
-            profile?.business_license_path || null,
-        };
-      });
-
-      setVesselList(merged);
-      setLoading(false);
+    if (!userData.user) {
+      setCurrentUserId("");
+      setCurrentUserProfile(null);
+      return;
     }
 
-    fetchVessels();
+    setCurrentUserId(userData.user.id);
+
+    const { data, error } = await supabase
+      .from("company_verification")
+      .select(
+        "user_id, company_name, verification_status, business_license_path, rejected_reason"
+      )
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
+
+    if (error || !data) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    setCurrentUserProfile(data as CurrentUserProfile);
+  }
+
+  async function fetchVesselList() {
+    setLoading(true);
+
+    const { data: vesselData, error: vesselError } = await supabase
+      .from("vessel_supply")
+      .select(
+        "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
+      )
+      .eq("status", "published")
+      .order("created_at", { ascending: false });
+
+    if (vesselError) {
+      alert(`读取船源失败：${vesselError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const vessels = (vesselData || []) as VesselSupply[];
+
+    const publisherIds = Array.from(
+      new Set(vessels.map((item) => item.publisher_id).filter(Boolean))
+    );
+
+    let profiles: CompanyProfile[] = [];
+
+    if (publisherIds.length > 0) {
+      const { data: profileData, error: profileError } = await supabase
+        .from("company_verification")
+        .select(
+          "user_id, company_name, verification_status, business_license_path"
+        )
+        .in("user_id", publisherIds);
+
+      if (!profileError) {
+        profiles = (profileData || []) as CompanyProfile[];
+      } else {
+        console.error(profileError);
+      }
+    }
+
+    const profileMap = new Map<string, CompanyProfile>();
+
+    profiles.forEach((profile) => {
+      if (!profileMap.has(profile.user_id)) {
+        profileMap.set(profile.user_id, profile);
+      }
+    });
+
+    const merged = vessels.map((vessel) => {
+      const profile = profileMap.get(vessel.publisher_id);
+
+      return {
+        ...vessel,
+        publisher_company_name: profile?.company_name || "",
+        publisher_verification_status: profile?.verification_status || "",
+        publisher_business_license_path: profile?.business_license_path || null,
+      };
+    });
+
+    setVesselList(merged);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    async function initPage() {
+      await fetchCurrentUserProfile();
+      await fetchVesselList();
+    }
+
+    initPage();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async () => {
+      await fetchCurrentUserProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    transportTypeFilter,
+    vesselTypeFilter,
+    capacityUnitFilter,
+    minCapacity,
+    maxCapacity,
+    keyword,
+    pageSize,
+  ]);
 
   const filteredVesselList = vesselList.filter((item) => {
     const matchTransportType =
       transportTypeFilter === "all"
         ? true
         : item.transport_type === transportTypeFilter;
+
+    const matchVesselType =
+      vesselTypeFilter === "all" ? true : item.vessel_type === vesselTypeFilter;
 
     const currentCapacityUnit = item.capacity_unit || "DWT";
 
@@ -222,146 +285,145 @@ export default function VesselsPage() {
       Number.isNaN(maxCapacityValue) ||
       item.dwt <= maxCapacityValue;
 
-    const vesselText = vesselTypeKeyword.trim().toLowerCase();
-    const cargoText = cargoKeyword.trim().toLowerCase();
-    const areaText = areaKeyword.trim().toLowerCase();
-
-    const matchVesselType =
-      vesselText === ""
-        ? true
-        : item.vessel_type.toLowerCase().includes(vesselText);
-
-    const matchCargo =
-      cargoText === ""
-        ? true
-        : Array.isArray(item.acceptable_cargo_types)
-          ? item.acceptable_cargo_types
-              .join(" ")
-              .toLowerCase()
-              .includes(cargoText)
-          : false;
-
-    const matchArea =
-      areaText === ""
-        ? true
-        : [
-            item.current_port_or_area,
-            item.current_destination_port || "",
-            item.service_area,
-            item.regular_route || "",
-            item.remark || "",
-            isLoggedIn ? item.publisher_company_name || "" : "",
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(areaText);
+    const matchSearch = matchKeyword(keyword, [
+      item.vessel_type,
+      item.transport_type,
+      item.dwt,
+      item.capacity_unit,
+      item.current_port_or_area,
+      item.current_destination_port,
+      item.available_start_date,
+      item.available_end_date,
+      item.service_area,
+      item.regular_route,
+      Array.isArray(item.acceptable_cargo_types)
+        ? item.acceptable_cargo_types.join(" ")
+        : "",
+      item.remark,
+      item.publisher_company_name,
+      item.publisher_verification_status,
+    ]);
 
     return (
       matchTransportType &&
+      matchVesselType &&
       matchCapacityUnit &&
       matchMinCapacity &&
       matchMaxCapacity &&
-      matchVesselType &&
-      matchCargo &&
-      matchArea
+      matchSearch
     );
   });
 
-  async function checkContactPermission(currentUserId: string) {
-    const { data: profileData, error: profileError } = await supabase
-      .from("company_verification")
-      .select("verification_status, business_license_path, rejected_reason")
-      .eq("user_id", currentUserId)
-      .maybeSingle();
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredVesselList.length / pageSize)
+  );
 
-    if (profileError) {
-      alert(`读取企业资料失败：${profileError.message}`);
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedVesselList = filteredVesselList.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize
+  );
+
+  function resetFilters() {
+    setTransportTypeFilter("all");
+    setVesselTypeFilter("all");
+    setCapacityUnitFilter("all");
+    setMinCapacity("");
+    setMaxCapacity("");
+    setKeyword("");
+    setCurrentPage(1);
+  }
+
+  function validateCanRequestContact(vessel: VesselSupply) {
+    if (!currentUserId) {
+      alert("请先登录后申请联系。");
+      window.location.href = "/login";
       return false;
     }
 
-    if (!profileData) {
-      alert("未找到企业资料，请先完成注册和企业资料提交。");
-      window.location.href = "/register";
+    if (currentUserId === vessel.publisher_id) {
+      alert("不能申请联系自己发布的船源。");
       return false;
     }
 
-    const profile = profileData as CurrentUserProfile;
-
-    if (!profile.business_license_path) {
-      alert("请先上传营业执照或企业资质文件后再申请联系。");
+    if (!currentUserProfile) {
+      alert("请先提交企业资料和营业执照后，再申请联系。");
+      window.location.href = "/my-profile";
       return false;
     }
 
-    if (profile.verification_status === "rejected") {
+    if (!currentUserProfile.business_license_path) {
+      alert("请先上传营业执照或企业资质文件后，再申请联系。");
+      window.location.href = "/my-profile";
+      return false;
+    }
+
+    if (currentUserProfile.verification_status === "rejected") {
       alert(
         `企业认证已被驳回，暂不能申请联系。驳回原因：${
-          profile.rejected_reason || "未填写"
+          currentUserProfile.rejected_reason || "未填写"
         }`
       );
+      window.location.href = "/my-profile";
+      return false;
+    }
+
+    if (
+      currentUserProfile.verification_status !== "pending" &&
+      currentUserProfile.verification_status !== "approved"
+    ) {
+      alert("请先提交企业认证资料后，再申请联系。");
+      window.location.href = "/my-profile";
       return false;
     }
 
     return true;
   }
 
-  async function handleContact(item: VesselSupply) {
-    setContactingId(item.id);
+  async function requestContact(vessel: VesselSupply) {
+    if (!validateCanRequestContact(vessel)) return;
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    setRequestingId(vessel.id);
 
-    if (userError || !userData.user) {
-      setContactingId(null);
-      alert("请先登录后再申请联系。");
-      window.location.href = "/login";
+    const { data: existingData, error: existingError } = await supabase
+      .from("contact_request")
+      .select("id")
+      .eq("requester_id", currentUserId)
+      .eq("vessel_supply_id", vessel.id)
+      .maybeSingle();
+
+    if (existingError) {
+      setRequestingId(null);
+      alert(`检查联系申请失败：${existingError.message}`);
       return;
     }
 
-    const currentUserId = userData.user.id;
-
-    if (currentUserId === item.publisher_id) {
-      setContactingId(null);
-      alert("不能申请联系自己发布的船源。");
-      return;
-    }
-
-    const allowed = await checkContactPermission(currentUserId);
-
-    if (!allowed) {
-      setContactingId(null);
+    if (existingData) {
+      setRequestingId(null);
+      alert("你已经申请联系过该船源。");
       return;
     }
 
     const { error } = await supabase.from("contact_request").insert({
       requester_id: currentUserId,
-      target_user_id: item.publisher_id,
+      target_user_id: vessel.publisher_id,
       cargo_demand_id: null,
-      vessel_supply_id: item.id,
+      vessel_supply_id: vessel.id,
       request_type: "cargo_to_vessel",
-      request_message: "我对该船源感兴趣，希望获取联系方式。",
-      auto_approved: true,
       status: "opened",
       contact_opened_at: new Date().toISOString(),
     });
 
-    setContactingId(null);
+    setRequestingId(null);
 
     if (error) {
-      console.error(error);
       alert(`申请联系失败：${error.message}`);
       return;
     }
 
-    alert("联系申请已提交。");
-  }
-
-  function resetFilters() {
-    setTransportTypeFilter("all");
-    setCapacityUnitFilter("all");
-    setMinCapacity("");
-    setMaxCapacity("");
-    setVesselTypeKeyword("");
-    setCargoKeyword("");
-    setAreaKeyword("");
+    alert("联系申请已提交。船方将在“我的船源”中看到你的企业联系方式。");
   }
 
   return (
@@ -369,18 +431,12 @@ export default function VesselsPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="船源大厅"
-          description="查看已审核发布的可用船舶与空档船期。支持按船型、可承运货种、区域、备注和运力区间筛选。"
+          description="浏览已审核发布的船源信息。可按船型、运输类型、运力单位、运力区间、区域和备注关键词进行筛选。"
           actionHref="/publish-vessel"
           actionText="发布船源"
         />
 
-        {!isLoggedIn ? (
-          <div className="mb-6 rounded-2xl bg-blue-50 p-4 text-sm text-blue-700 ring-1 ring-blue-100">
-            当前为游客浏览模式。登录后可查看发布方企业名称和认证状态，并可申请联系。
-          </div>
-        ) : null}
-
-        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-7">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-8">
           <select
             value={transportTypeFilter}
             onChange={(event) => setTransportTypeFilter(event.target.value)}
@@ -390,6 +446,20 @@ export default function VesselsPage() {
             <option value="domestic">内贸</option>
             <option value="international">外贸</option>
             <option value="both">均可</option>
+          </select>
+
+          <select
+            value={vesselTypeFilter}
+            onChange={(event) => setVesselTypeFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部船型</option>
+            <option value="散货船">散货船</option>
+            <option value="集装箱船">集装箱船</option>
+            <option value="多用途船">多用途船</option>
+            <option value="重大件船">重大件船</option>
+            <option value="杂货船">杂货船</option>
+            <option value="其他">其他</option>
           </select>
 
           <select
@@ -426,162 +496,210 @@ export default function VesselsPage() {
           />
 
           <input
-            value={vesselTypeKeyword}
-            onChange={(event) => setVesselTypeKeyword(event.target.value)}
-            className="rounded-xl border px-3 py-2"
-            placeholder="搜索船型"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            className="rounded-xl border px-3 py-2 md:col-span-2"
+            placeholder="关键词搜索：船型、区域、货种、备注"
           />
-
-          <input
-            value={cargoKeyword}
-            onChange={(event) => setCargoKeyword(event.target.value)}
-            className="rounded-xl border px-3 py-2"
-            placeholder="搜索货种"
-          />
-
-          <input
-            value={areaKeyword}
-            onChange={(event) => setAreaKeyword(event.target.value)}
-            className="rounded-xl border px-3 py-2"
-            placeholder="关键词搜索"
-          />
-        </div>
-
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm text-slate-500">
-            共 {vesselList.length} 条船源，当前显示 {filteredVesselList.length} 条。
-            <span className="ml-2">
-              运力区间会结合所选运力单位筛选，建议先选择 DWT 或 TEU。
-            </span>
-          </div>
 
           <button
             type="button"
             onClick={resetFilters}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-white"
           >
             重置筛选
           </button>
         </div>
 
+        <div className="mb-4 text-sm text-slate-500">
+          共 {vesselList.length} 条船源，筛选后 {filteredVesselList.length} 条，
+          当前第 {safeCurrentPage} / {totalPages} 页。
+        </div>
+
         {loading ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            正在读取船源数据...
-          </div>
-        ) : errorMessage ? (
-          <div className="rounded-2xl bg-red-50 p-5 text-red-700 ring-1 ring-red-200">
-            数据读取失败：{errorMessage}
-          </div>
-        ) : vesselList.length === 0 ? (
-          <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            暂无已审核通过的船源数据。你可以先发布一条测试船源，并在后台审核通过。
+            正在读取船源信息...
           </div>
         ) : filteredVesselList.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            没有符合筛选条件的船源。
+            暂无符合条件的船源。
           </div>
         ) : (
-          <div className="grid gap-5">
-            {filteredVesselList.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="text-xl font-bold">{item.vessel_type}</h2>
+          <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div className="grid gap-5">
+              {paginatedVesselList.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 p-5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <h2 className="text-xl font-bold">{item.vessel_type}</h2>
 
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                        {formatTransportType(item.transport_type)}
-                      </span>
-
-                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                        {formatStatus(item.status)}
-                      </span>
-
-                      {isLoggedIn ? (
-                        <span
-                          className={getVerificationBadgeClass(
-                            item.publisher_verification_status
-                          )}
-                        >
-                          {formatVerificationStatus(
-                            item.publisher_verification_status,
-                            item.publisher_business_license_path
-                          )}
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                          {formatTransportType(item.transport_type)}
                         </span>
+
+                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                          {formatStatus(item.status)}
+                        </span>
+
+                        {currentUserId ? (
+                          <span
+                            className={getVerificationBadgeClass(
+                              item.publisher_verification_status
+                            )}
+                          >
+                            发布方
+                            {formatVerificationStatus(
+                              item.publisher_verification_status
+                            )}
+                          </span>
+                        ) : null}
+
+                        {item.is_ballast_return ? (
+                          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                            返程空载
+                          </span>
+                        ) : null}
+
+                        {item.is_idle_slot ? (
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+                            空档船期
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-2 text-slate-600">
+                        当前港/区域：{item.current_port_or_area}
+                        {item.current_destination_port
+                          ? `；当前目的港：${item.current_destination_port}`
+                          : ""}
+                      </p>
+
+                      <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
+                        <p>
+                          运力规模：{item.dwt}{" "}
+                          {formatCapacityUnit(item.capacity_unit)}
+                        </p>
+                        <p>可用开始：{formatDate(item.available_start_date)}</p>
+                        <p>
+                          可用结束：
+                          {item.available_end_date
+                            ? formatDate(item.available_end_date)
+                            : "未填写"}
+                        </p>
+                        <p>
+                          有效期至：{formatDate(item.information_expiry_date)}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                        <p>服务区域：{item.service_area}</p>
+                        <p>常跑航线：{item.regular_route || "未填写"}</p>
+                        <p>
+                          可承运：
+                          {Array.isArray(item.acceptable_cargo_types)
+                            ? item.acceptable_cargo_types.join("、")
+                            : ""}
+                        </p>
+                      </div>
+
+                      {currentUserId ? (
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <p className="font-bold text-slate-800">发布方信息</p>
+                          <p className="mt-2">
+                            企业名称：
+                            {item.publisher_company_name || "未填写企业名称"}
+                          </p>
+                          <p className="mt-1">
+                            认证状态：
+                            {formatVerificationStatus(
+                              item.publisher_verification_status
+                            )}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
+                          登录后可查看发布方企业信息和认证状态。
+                        </div>
+                      )}
+
+                      {item.remark ? (
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <span className="font-medium text-slate-800">
+                            备注：
+                          </span>
+                          {item.remark}
+                        </div>
                       ) : null}
 
-                      {item.is_ballast_return ? (
-                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                          返程空载
-                        </span>
-                      ) : null}
-
-                      {item.is_idle_slot ? (
-                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
-                          空档船期
-                        </span>
-                      ) : null}
+                      <p className="mt-3 text-xs text-slate-400">
+                        发布时间：{formatDate(item.created_at)}
+                      </p>
                     </div>
 
-                    <p className="mt-2 text-slate-600">
-                      当前港/区域：{item.current_port_or_area}
-                      {item.current_destination_port
-                        ? `；当前目的港：${item.current_destination_port}`
-                        : ""}
-                    </p>
-
-                    {isLoggedIn ? (
-                      <p className="mt-2 text-sm text-slate-500">
-                        发布方：
-                        {item.publisher_company_name || "未公开企业名称"}
-                      </p>
-                    ) : (
-                      <p className="mt-2 text-sm text-slate-400">
-                        登录后可查看发布方企业信息
-                      </p>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => requestContact(item)}
+                        disabled={
+                          requestingId === item.id ||
+                          currentUserId === item.publisher_id
+                        }
+                        className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                      >
+                        {requestingId === item.id ? "申请中..." : "申请联系"}
+                      </button>
+                    </div>
                   </div>
-
-                  <button
-                    onClick={() => handleContact(item)}
-                    disabled={contactingId === item.id}
-                    className="rounded-xl border border-blue-700 px-5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
-                  >
-                    {contactingId === item.id ? "提交中..." : "申请联系"}
-                  </button>
                 </div>
+              ))}
+            </div>
 
-                <div className="mt-5 grid gap-3 text-sm text-slate-600 md:grid-cols-4">
-                  <p>
-                    运力规模：{item.dwt} {formatCapacityUnit(item.capacity_unit)}
-                  </p>
-                  <p>可用开始：{item.available_start_date}</p>
-                  <p>
-                    可承运：
-                    {Array.isArray(item.acceptable_cargo_types)
-                      ? item.acceptable_cargo_types.join("、")
-                      : ""}
-                  </p>
-                  <p>有效期至：{item.information_expiry_date}</p>
-                </div>
-
-                <div className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
-                  <p>服务区域：{item.service_area}</p>
-                  <p>常跑航线：{item.regular_route || "未填写"}</p>
-                </div>
-
-                {item.remark ? (
-                  <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                    <span className="font-medium text-slate-800">备注：</span>
-                    {item.remark}
-                  </div>
-                ) : null}
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>每页显示</span>
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value))}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value={10}>10 条</option>
+                  <option value={20}>20 条</option>
+                  <option value={50}>50 条</option>
+                </select>
               </div>
-            ))}
-          </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(1, prev - 1))
+                  }
+                  disabled={safeCurrentPage <= 1}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  上一页
+                </button>
+
+                <span className="text-sm text-slate-600">
+                  第 {safeCurrentPage} / {totalPages} 页
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                  }
+                  disabled={safeCurrentPage >= totalPages}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </section>
         )}
       </div>
     </main>
