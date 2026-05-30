@@ -51,6 +51,7 @@ type CompanyVerification = {
   verification_status: string;
   verified_at: string | null;
   rejected_reason: string | null;
+  is_admin: boolean | null;
   created_at: string;
 };
 
@@ -111,7 +112,43 @@ export default function AdminPage() {
   const [vesselList, setVesselList] = useState<VesselSupply[]>([]);
   const [companyList, setCompanyList] = useState<CompanyVerification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  async function checkAdminPermission() {
+    setCheckingAdmin(true);
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+      alert("请先登录后访问后台。");
+      window.location.href = "/login";
+      return false;
+    }
+
+    const { data: profileData, error: profileError } = await supabase
+      .from("company_verification")
+      .select("is_admin")
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      alert(`读取管理员权限失败：${profileError.message}`);
+      window.location.href = "/";
+      return false;
+    }
+
+    if (!profileData || profileData.is_admin !== true) {
+      alert("无权限访问后台。");
+      window.location.href = "/";
+      return false;
+    }
+
+    setIsAdmin(true);
+    setCheckingAdmin(false);
+    return true;
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -133,7 +170,7 @@ export default function AdminPage() {
     const { data: companyData, error: companyError } = await supabase
       .from("company_verification")
       .select(
-        "id, user_id, user_type, company_name, unified_social_credit_code, company_type, contact_name, contact_phone, contact_email, main_business, business_license_path, business_license_uploaded_at, verification_status, verified_at, rejected_reason, created_at"
+        "id, user_id, user_type, company_name, unified_social_credit_code, company_type, contact_name, contact_phone, contact_email, main_business, business_license_path, business_license_uploaded_at, verification_status, verified_at, rejected_reason, is_admin, created_at"
       )
       .order("created_at", { ascending: false });
 
@@ -159,7 +196,15 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    fetchData();
+    async function initAdminPage() {
+      const allowed = await checkAdminPermission();
+
+      if (allowed) {
+        await fetchData();
+      }
+    }
+
+    initAdminPage();
   }, []);
 
   async function updateCargoStatus(id: string, status: string) {
@@ -275,12 +320,36 @@ export default function AdminPage() {
     await fetchData();
   }
 
+  if (checkingAdmin) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
+        <div className="mx-auto max-w-7xl">
+          <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
+            正在校验管理员权限...
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
+        <div className="mx-auto max-w-7xl">
+          <div className="rounded-2xl bg-white p-8 text-center text-red-600 shadow-sm ring-1 ring-slate-200">
+            无权限访问后台。
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="后台审核"
-          description="测试版后台：用于审核货源、船源和企业认证信息。正式上线前需要增加管理员登录权限。"
+          description="管理员后台：用于审核货源、船源和企业认证信息。"
         />
 
         <div className="mb-6 flex flex-wrap gap-3">
@@ -347,6 +416,12 @@ export default function AdminPage() {
                                 item.verification_status
                               )}
                             </span>
+
+                            {item.is_admin ? (
+                              <span className="rounded-full bg-purple-50 px-3 py-1 text-xs text-purple-700">
+                                管理员
+                              </span>
+                            ) : null}
 
                             {item.business_license_path ? (
                               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
