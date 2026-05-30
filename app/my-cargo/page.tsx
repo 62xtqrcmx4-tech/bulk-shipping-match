@@ -34,6 +34,7 @@ type CargoDemand = {
   expected_vessel_type: string;
   information_expiry_date: string;
   status: string;
+  rejected_reason: string | null;
   remark: string | null;
   created_at: string;
   contacts?: ContactRequest[];
@@ -119,7 +120,7 @@ export default function MyCargoPage() {
     const { data: cargoData, error: cargoError } = await supabase
       .from("cargo_demand")
       .select(
-        "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, remark, created_at"
+        "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, rejected_reason, remark, created_at"
       )
       .eq("publisher_id", userId)
       .order("created_at", { ascending: false });
@@ -253,6 +254,7 @@ export default function MyCargoPage() {
             item.loading_port,
             item.discharge_port,
             item.expected_vessel_type,
+            item.rejected_reason || "",
             item.remark || "",
             contacts
               .map((contact) =>
@@ -513,6 +515,13 @@ export default function MyCargoPage() {
                         <p>期望船型：{item.expected_vessel_type}</p>
                         <p>有效期至：{item.information_expiry_date}</p>
                       </div>
+
+                      {item.status === "rejected" && item.rejected_reason ? (
+                        <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
+                          <span className="font-semibold">审核未通过原因：</span>
+                          {item.rejected_reason}
+                        </div>
+                      ) : null}
 
                       {item.remark ? (
                         <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
