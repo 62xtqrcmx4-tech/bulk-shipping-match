@@ -34,8 +34,8 @@ export default function RegisterPage() {
       return;
     }
 
-    if (licenseFile.size > 10 * 1024 * 1024) {
-      alert("营业执照文件不能超过 10MB。");
+    if (licenseFile.size > 3 * 1024 * 1024) {
+      alert("营业执照文件不能超过 3MB。");
       setLoading(false);
       return;
     }
@@ -236,7 +236,7 @@ export default function RegisterPage() {
               className="rounded-xl border bg-white px-3 py-3"
             />
             <span className="text-sm text-slate-500">
-              支持 JPG、PNG、WEBP、PDF，文件大小不超过 10MB。该文件用于平台审核和交易方资质查询。
+              支持 JPG、PNG、WEBP、PDF，文件大小不超过 3MB。该文件用于平台审核和交易方资质查询。
             </span>
           </label>
 
