@@ -32,6 +32,12 @@ type CompanyProfile = {
   business_license_path: string | null;
 };
 
+type CurrentUserProfile = {
+  verification_status: string;
+  business_license_path: string | null;
+  rejected_reason: string | null;
+};
+
 function formatTransportType(type: string) {
   if (type === "domestic") return "内贸";
   if (type === "international") return "外贸";
@@ -231,6 +237,43 @@ export default function CargoPage() {
     );
   });
 
+  async function checkContactPermission(currentUserId: string) {
+    const { data: profileData, error: profileError } = await supabase
+      .from("company_verification")
+      .select("verification_status, business_license_path, rejected_reason")
+      .eq("user_id", currentUserId)
+      .maybeSingle();
+
+    if (profileError) {
+      alert(`读取企业资料失败：${profileError.message}`);
+      return false;
+    }
+
+    if (!profileData) {
+      alert("未找到企业资料，请先完成注册和企业资料提交。");
+      window.location.href = "/register";
+      return false;
+    }
+
+    const profile = profileData as CurrentUserProfile;
+
+    if (!profile.business_license_path) {
+      alert("请先上传营业执照或企业资质文件后再申请联系。");
+      return false;
+    }
+
+    if (profile.verification_status === "rejected") {
+      alert(
+        `企业认证已被驳回，暂不能申请联系。驳回原因：${
+          profile.rejected_reason || "未填写"
+        }`
+      );
+      return false;
+    }
+
+    return true;
+  }
+
   async function handleContact(item: CargoDemand) {
     setContactingId(item.id);
 
@@ -248,6 +291,13 @@ export default function CargoPage() {
     if (currentUserId === item.publisher_id) {
       setContactingId(null);
       alert("不能申请联系自己发布的货源。");
+      return;
+    }
+
+    const allowed = await checkContactPermission(currentUserId);
+
+    if (!allowed) {
+      setContactingId(null);
       return;
     }
 
