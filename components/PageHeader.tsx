@@ -13,12 +13,7 @@ export default function PageHeader({
 }: PageHeaderProps) {
   return (
     <div className="mb-8">
-      <a
-        href="/"
-        className="mb-6 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-      >
-        ← 返回首页
-      </a>
+ 
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
