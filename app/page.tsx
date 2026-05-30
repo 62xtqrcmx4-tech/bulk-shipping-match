@@ -1,75 +1,6 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
-import AuthButton from "../components/AuthButton";
-
 export default function Home() {
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    async function checkAdmin() {
-      const { data: userData } = await supabase.auth.getUser();
-
-      if (!userData.user) {
-        setIsAdmin(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("company_verification")
-        .select("is_admin")
-        .eq("user_id", userData.user.id)
-        .maybeSingle();
-
-      if (error || !data) {
-        setIsAdmin(false);
-        return;
-      }
-
-      setIsAdmin(data.is_admin === true);
-    }
-
-    checkAdmin();
-  }, []);
-
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <a href="/" className="text-xl font-bold tracking-tight">
-            船货撮合平台
-          </a>
-
-          <nav className="hidden gap-6 text-sm font-medium text-slate-600 md:flex">
-            <a href="/cargo" className="hover:text-slate-950">
-              货源大厅
-            </a>
-            <a href="/vessels" className="hover:text-slate-950">
-              船源大厅
-            </a>
-            <a href="/publish-cargo" className="hover:text-slate-950">
-              发布货源
-            </a>
-            <a href="/publish-vessel" className="hover:text-slate-950">
-              发布船源
-            </a>
-            <a href="/my-cargo" className="hover:text-slate-950">
-              我的货源
-            </a>
-            <a href="/my-vessels" className="hover:text-slate-950">
-              我的船源
-            </a>
-            <a href="/my-profile" className="hover:text-slate-950">
-              我的资料
-            </a>
-
-          </nav>
-
-          <AuthButton />
-        </div>
-      </header>
-
       <section className="mx-auto max-w-7xl px-6 py-16">
         <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
           <div>
@@ -82,7 +13,7 @@ export default function Home() {
             </h1>
 
             <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600">
-              平台支持货源发布、船源发布、企业资质提交、后台审核、条件筛选、申请联系、我的订单管理和我的船源管理。游客可浏览基础信息，登录用户可查看发布方认证状态并申请联系。
+              平台支持货源发布、船源发布、企业资质提交、后台审核、条件筛选、申请联系、我的货源管理和我的船源管理。游客可浏览基础信息，登录用户可查看发布方认证状态并申请联系。
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -189,17 +120,15 @@ export default function Home() {
             </p>
           </a>
 
-          {isAdmin ? (
-            <a
-              href="/admin"
-              className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 hover:shadow-md"
-            >
-              <h3 className="text-xl font-bold">后台审核</h3>
-              <p className="mt-3 text-sm leading-6 text-slate-500">
-                管理员审核企业认证、货源信息和船源信息。
-              </p>
-            </a>
-          ) : null}
+          <a
+            href="/contacts"
+            className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 hover:shadow-md"
+          >
+            <h3 className="text-xl font-bold">联系记录</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-500">
+              查看我发起或收到的联系申请记录。
+            </p>
+          </a>
         </div>
       </section>
     </main>
