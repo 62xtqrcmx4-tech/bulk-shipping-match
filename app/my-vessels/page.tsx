@@ -39,6 +39,7 @@ type VesselSupply = {
   acceptable_cargo_types: string[];
   information_expiry_date: string;
   status: string;
+  rejected_reason: string | null;
   remark: string | null;
   created_at: string;
   contacts?: ContactRequest[];
@@ -116,7 +117,7 @@ export default function MyVesselsPage() {
     const { data: vesselData, error: vesselError } = await supabase
       .from("vessel_supply")
       .select(
-        "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
+        "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, rejected_reason, remark, created_at"
       )
       .eq("publisher_id", userId)
       .order("created_at", { ascending: false });
@@ -258,6 +259,7 @@ export default function MyVesselsPage() {
             Array.isArray(item.acceptable_cargo_types)
               ? item.acceptable_cargo_types.join(" ")
               : "",
+            item.rejected_reason || "",
             item.remark || "",
             contacts
               .map((contact) =>
@@ -490,6 +492,13 @@ export default function MyVesselsPage() {
                         <p>服务区域：{item.service_area}</p>
                         <p>常跑航线：{item.regular_route || "未填写"}</p>
                       </div>
+
+                      {item.status === "rejected" && item.rejected_reason ? (
+                        <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
+                          <span className="font-semibold">审核未通过原因：</span>
+                          {item.rejected_reason}
+                        </div>
+                      ) : null}
 
                       {item.remark ? (
                         <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
