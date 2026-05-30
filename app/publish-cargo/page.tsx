@@ -5,6 +5,15 @@ import type { FormEvent } from "react";
 import { supabase } from "../../lib/supabase";
 import PageHeader from "../../components/PageHeader";
 
+type CompanyProfile = {
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string | null;
+  verification_status: string;
+  business_license_path: string | null;
+  rejected_reason: string | null;
+};
+
 export default function PublishCargoPage() {
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +36,9 @@ export default function PublishCargoPage() {
 
     const { data: profileData, error: profileError } = await supabase
       .from("company_verification")
-      .select("contact_name, contact_phone, contact_email")
+      .select(
+        "contact_name, contact_phone, contact_email, verification_status, business_license_path, rejected_reason"
+      )
       .eq("user_id", currentUserId)
       .maybeSingle();
 
@@ -41,6 +52,24 @@ export default function PublishCargoPage() {
       alert("未找到企业资料，请先完成注册和企业资料提交。");
       setLoading(false);
       window.location.href = "/register";
+      return;
+    }
+
+    const profile = profileData as CompanyProfile;
+
+    if (!profile.business_license_path) {
+      alert("请先上传营业执照或企业资质文件后再发布货源。");
+      setLoading(false);
+      return;
+    }
+
+    if (profile.verification_status === "rejected") {
+      alert(
+        `企业认证已被驳回，暂不能发布货源。驳回原因：${
+          profile.rejected_reason || "未填写"
+        }`
+      );
+      setLoading(false);
       return;
     }
 
@@ -60,9 +89,9 @@ export default function PublishCargoPage() {
 
       remark: String(formData.get("remark") || ""),
 
-      contact_name: profileData.contact_name,
-      contact_phone: profileData.contact_phone,
-      contact_email: profileData.contact_email || userData.user.email || "",
+      contact_name: profile.contact_name,
+      contact_phone: profile.contact_phone,
+      contact_email: profile.contact_email || userData.user.email || "",
 
       status: "pending",
     };
@@ -77,7 +106,12 @@ export default function PublishCargoPage() {
       return;
     }
 
-    alert("货源已提交，等待平台审核。");
+    if (profile.verification_status === "approved") {
+      alert("货源已提交，等待平台审核。");
+    } else {
+      alert("货源已提交，等待平台审核。当前企业证照已提交，平台认证仍在审核中。");
+    }
+
     window.location.href = "/my-cargo";
   }
 
@@ -91,6 +125,10 @@ export default function PublishCargoPage() {
       </div>
 
       <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+        <div className="mb-6 rounded-2xl bg-blue-50 p-4 text-sm text-blue-700 ring-1 ring-blue-100">
+          发布货源前需已提交企业资料和营业执照。企业认证待审核期间仍可提交货源，但前台将显示“证照已提交，待审核”。
+        </div>
+
         <form onSubmit={handleSubmit} className="grid gap-5">
           <div className="grid gap-5 md:grid-cols-2">
             <label className="grid gap-2">
@@ -223,7 +261,7 @@ export default function PublishCargoPage() {
               placeholder="例如：重大件、需吊装、袋装粮、集装箱、危险品、需绑扎、需防潮、可分批装运等"
             />
             <span className="text-sm text-slate-500">
-              备注内容将支持关键词检索，适合填写特种货物、装卸要求、绑扎要求、包装形式等信息。
+              备注内容支持关键词检索，适合填写特种货物、装卸要求、绑扎要求、包装形式等信息。
             </span>
           </label>
 
