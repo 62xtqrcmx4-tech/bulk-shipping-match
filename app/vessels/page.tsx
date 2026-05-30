@@ -123,6 +123,8 @@ export default function VesselsPage() {
   const [transportTypeFilter, setTransportTypeFilter] = useState("all");
   const [vesselTypeFilter, setVesselTypeFilter] = useState("all");
   const [capacityUnitFilter, setCapacityUnitFilter] = useState("all");
+  const [publisherVerificationFilter, setPublisherVerificationFilter] =
+    useState("all");
   const [minCapacity, setMinCapacity] = useState("");
   const [maxCapacity, setMaxCapacity] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -242,6 +244,7 @@ export default function VesselsPage() {
     transportTypeFilter,
     vesselTypeFilter,
     capacityUnitFilter,
+    publisherVerificationFilter,
     minCapacity,
     maxCapacity,
     keyword,
@@ -263,6 +266,15 @@ export default function VesselsPage() {
       capacityUnitFilter === "all"
         ? true
         : currentCapacityUnit === capacityUnitFilter;
+
+    const currentPublisherStatus = item.publisher_verification_status || "";
+
+    const matchPublisherVerification =
+      publisherVerificationFilter === "all"
+        ? true
+        : publisherVerificationFilter === "unverified"
+          ? currentPublisherStatus === ""
+          : currentPublisherStatus === publisherVerificationFilter;
 
     const minCapacityValue =
       minCapacity.trim() === "" ? null : Number(minCapacity);
@@ -303,6 +315,7 @@ export default function VesselsPage() {
       matchTransportType &&
       matchVesselType &&
       matchCapacityUnit &&
+      matchPublisherVerification &&
       matchMinCapacity &&
       matchMaxCapacity &&
       matchSearch
@@ -325,6 +338,7 @@ export default function VesselsPage() {
     setTransportTypeFilter("all");
     setVesselTypeFilter("all");
     setCapacityUnitFilter("all");
+    setPublisherVerificationFilter("all");
     setMinCapacity("");
     setMaxCapacity("");
     setKeyword("");
@@ -426,12 +440,12 @@ export default function VesselsPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="船源大厅"
-          description="浏览已审核发布的船源信息。可按船型、运输类型、运力单位、运力区间、区域和备注关键词进行筛选。"
+          description="浏览已审核发布的船源信息。可按船型、运输类型、运力单位、运力区间、发布方认证状态、区域和备注关键词进行筛选。"
           actionHref="/publish-vessel"
           actionText="发布船源"
         />
 
-        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-8">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-9">
           <select
             value={transportTypeFilter}
             onChange={(event) => setTransportTypeFilter(event.target.value)}
@@ -468,6 +482,20 @@ export default function VesselsPage() {
             <option value="CBM">CBM</option>
             <option value="piece">件</option>
             <option value="other">其他</option>
+          </select>
+
+          <select
+            value={publisherVerificationFilter}
+            onChange={(event) =>
+              setPublisherVerificationFilter(event.target.value)
+            }
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部认证状态</option>
+            <option value="approved">已认证发布方</option>
+            <option value="pending">待审核发布方</option>
+            <option value="rejected">认证驳回发布方</option>
+            <option value="unverified">未认证发布方</option>
           </select>
 
           <input
