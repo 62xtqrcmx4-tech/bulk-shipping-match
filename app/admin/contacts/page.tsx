@@ -121,6 +121,9 @@ export default function AdminContactsPage() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const [loading, setLoading] = useState(true);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -288,6 +291,7 @@ export default function AdminContactsPage() {
 
       return {
         ...contact,
+
         requester_company_name: requester?.company_name || "",
         requester_contact_name: requester?.contact_name || "",
         requester_contact_phone: requester?.contact_phone || "",
@@ -321,6 +325,10 @@ export default function AdminContactsPage() {
     initPage();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [keyword, typeFilter, statusFilter, pageSize]);
+
   const filteredContactList = contactList.filter((item) => {
     const matchType =
       typeFilter === "all" ? true : item.request_type === typeFilter;
@@ -351,6 +359,18 @@ export default function AdminContactsPage() {
 
     return matchType && matchStatus && matchSearch;
   });
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredContactList.length / pageSize)
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedContactList = filteredContactList.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize
+  );
 
   if (checkingAdmin) {
     return (
@@ -420,6 +440,7 @@ export default function AdminContactsPage() {
               setKeyword("");
               setTypeFilter("all");
               setStatusFilter("all");
+              setCurrentPage(1);
             }}
             className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
           >
@@ -443,8 +464,9 @@ export default function AdminContactsPage() {
             <div className="mb-5">
               <h2 className="text-2xl font-bold">联系申请列表</h2>
               <p className="mt-1 text-sm text-slate-500">
-                共 {contactList.length} 条联系申请，当前显示{" "}
-                {filteredContactList.length} 条
+                共 {contactList.length} 条联系申请，筛选后{" "}
+                {filteredContactList.length} 条，当前第 {safeCurrentPage} /{" "}
+                {totalPages} 页
               </p>
             </div>
 
@@ -453,85 +475,134 @@ export default function AdminContactsPage() {
                 暂无符合条件的联系申请数据
               </div>
             ) : (
-              <div className="grid gap-4">
-                {filteredContactList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200 p-5"
-                  >
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                        {formatContactType(item.request_type)}
-                      </span>
-
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                        {formatContactStatus(item.status)}
-                      </span>
-
-                      {item.related_status ? (
-                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
-                          关联资源状态：{item.related_status}
+              <>
+                <div className="grid gap-4">
+                  {paginatedContactList.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200 p-5"
+                    >
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                          {formatContactType(item.request_type)}
                         </span>
-                      ) : null}
-                    </div>
 
-                    <p className="mt-3 text-sm font-medium text-slate-800">
-                      {item.related_title || "未关联资源"}
-                    </p>
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                          {formatContactStatus(item.status)}
+                        </span>
 
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-bold text-slate-800">申请方</p>
-                          <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-600 ring-1 ring-slate-200">
-                            {formatVerificationStatus(
-                              item.requester_verification_status
-                            )}
+                        {item.related_status ? (
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+                            关联资源状态：{item.related_status}
                           </span>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-3 text-sm font-medium text-slate-800">
+                        {item.related_title || "未关联资源"}
+                      </p>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-slate-800">申请方</p>
+                            <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-600 ring-1 ring-slate-200">
+                              {formatVerificationStatus(
+                                item.requester_verification_status
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="mt-2 grid gap-1">
+                            <p>
+                              企业：{item.requester_company_name || "未填写"}
+                            </p>
+                            <p>
+                              联系人：{item.requester_contact_name || "未填写"}
+                            </p>
+                            <p>
+                              电话：{item.requester_contact_phone || "未填写"}
+                            </p>
+                            <p>
+                              邮箱：{item.requester_contact_email || "未填写"}
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="mt-2 grid gap-1">
-                          <p>
-                            企业：{item.requester_company_name || "未填写"}
-                          </p>
-                          <p>
-                            联系人：{item.requester_contact_name || "未填写"}
-                          </p>
-                          <p>
-                            电话：{item.requester_contact_phone || "未填写"}
-                          </p>
-                          <p>
-                            邮箱：{item.requester_contact_email || "未填写"}
-                          </p>
+                        <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-slate-800">被联系方</p>
+                            <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-600 ring-1 ring-slate-200">
+                              {formatVerificationStatus(
+                                item.target_verification_status
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="mt-2 grid gap-1">
+                            <p>企业：{item.target_company_name || "未填写"}</p>
+                            <p>联系人：{item.target_contact_name || "未填写"}</p>
+                            <p>电话：{item.target_contact_phone || "未填写"}</p>
+                            <p>邮箱：{item.target_contact_email || "未填写"}</p>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-bold text-slate-800">被联系方</p>
-                          <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-600 ring-1 ring-slate-200">
-                            {formatVerificationStatus(
-                              item.target_verification_status
-                            )}
-                          </span>
-                        </div>
-
-                        <div className="mt-2 grid gap-1">
-                          <p>企业：{item.target_company_name || "未填写"}</p>
-                          <p>联系人：{item.target_contact_name || "未填写"}</p>
-                          <p>电话：{item.target_contact_phone || "未填写"}</p>
-                          <p>邮箱：{item.target_contact_email || "未填写"}</p>
-                        </div>
+                      <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">
+                        <p>申请时间：{formatDate(item.created_at)}</p>
+                        <p>开放时间：{formatDate(item.contact_opened_at)}</p>
                       </div>
                     </div>
+                  ))}
+                </div>
 
-                    <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">
-                      <p>申请时间：{formatDate(item.created_at)}</p>
-                      <p>开放时间：{formatDate(item.contact_opened_at)}</p>
-                    </div>
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <span>每页显示</span>
+                    <select
+                      value={pageSize}
+                      onChange={(event) =>
+                        setPageSize(Number(event.target.value))
+                      }
+                      className="rounded-xl border bg-white px-3 py-2 text-sm"
+                    >
+                      <option value={10}>10 条</option>
+                      <option value={20}>20 条</option>
+                      <option value={50}>50 条</option>
+                    </select>
                   </div>
-                ))}
-              </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(1, prev - 1))
+                      }
+                      disabled={safeCurrentPage <= 1}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      上一页
+                    </button>
+
+                    <span className="text-sm text-slate-600">
+                      第 {safeCurrentPage} / {totalPages} 页
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((prev) =>
+                          Math.min(totalPages, prev + 1)
+                        )
+                      }
+                      disabled={safeCurrentPage >= totalPages}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </section>
         )}
