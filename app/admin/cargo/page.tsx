@@ -95,6 +95,9 @@ export default function AdminCargoPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [keyword, setKeyword] = useState("");
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const [loading, setLoading] = useState(true);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -210,6 +213,10 @@ export default function AdminCargoPage() {
     initPage();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [keyword, statusFilter, pageSize]);
+
   const filteredCargoList = cargoList.filter((item) => {
     const matchStatus =
       statusFilter === "all"
@@ -247,6 +254,15 @@ export default function AdminCargoPage() {
 
     return matchStatus && matchSearch;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredCargoList.length / pageSize));
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedCargoList = filteredCargoList.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize
+  );
 
   async function approveCargo(id: string) {
     setUpdatingId(id);
@@ -387,6 +403,7 @@ export default function AdminCargoPage() {
             onClick={() => {
               setKeyword("");
               setStatusFilter("all");
+              setCurrentPage(1);
             }}
             className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
           >
@@ -410,8 +427,9 @@ export default function AdminCargoPage() {
             <div className="mb-5">
               <h2 className="text-2xl font-bold">货源列表</h2>
               <p className="mt-1 text-sm text-slate-500">
-                共 {cargoList.length} 条货源，当前显示{" "}
-                {filteredCargoList.length} 条
+                共 {cargoList.length} 条货源，筛选后{" "}
+                {filteredCargoList.length} 条，当前第 {safeCurrentPage} /{" "}
+                {totalPages} 页
               </p>
             </div>
 
@@ -420,116 +438,165 @@ export default function AdminCargoPage() {
                 暂无符合条件的货源数据
               </div>
             ) : (
-              <div className="grid gap-4">
-                {filteredCargoList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200 p-5"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h3 className="text-lg font-bold">
-                            {item.cargo_type}
-                          </h3>
+              <>
+                <div className="grid gap-4">
+                  {paginatedCargoList.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200 p-5"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <h3 className="text-lg font-bold">
+                              {item.cargo_type}
+                            </h3>
 
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                            {formatTransportType(item.transport_type)}
-                          </span>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                              {formatTransportType(item.transport_type)}
+                            </span>
 
-                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                            {formatStatus(item.status)}
-                          </span>
+                            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                              {formatStatus(item.status)}
+                            </span>
 
-                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
-                            {formatVerificationStatus(
-                              item.publisher_verification_status
-                            )}
-                          </span>
-                        </div>
+                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+                              {formatVerificationStatus(
+                                item.publisher_verification_status
+                              )}
+                            </span>
+                          </div>
 
-                        <p className="mt-2 text-sm text-slate-600">
-                          {item.loading_port} → {item.discharge_port}
-                        </p>
-
-                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
-                          <p>
-                            货量：{item.cargo_quantity}{" "}
-                            {formatCargoUnit(item.cargo_unit)}
+                          <p className="mt-2 text-sm text-slate-600">
+                            {item.loading_port} → {item.discharge_port}
                           </p>
-                          <p>计划装货：{item.planned_loading_date}</p>
-                          <p>期望船型：{item.expected_vessel_type}</p>
-                          <p>有效期至：{item.information_expiry_date}</p>
+
+                          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
+                            <p>
+                              货量：{item.cargo_quantity}{" "}
+                              {formatCargoUnit(item.cargo_unit)}
+                            </p>
+                            <p>计划装货：{item.planned_loading_date}</p>
+                            <p>期望船型：{item.expected_vessel_type}</p>
+                            <p>有效期至：{item.information_expiry_date}</p>
+                          </div>
+
+                          <div className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <p className="font-bold text-slate-800">发布方</p>
+                            <div className="mt-2 grid gap-1 md:grid-cols-2">
+                              <p>
+                                企业：
+                                {item.publisher_company_name || "未填写"}
+                              </p>
+                              <p>
+                                联系人：
+                                {item.publisher_contact_name || "未填写"}
+                              </p>
+                              <p>
+                                电话：
+                                {item.publisher_contact_phone || "未填写"}
+                              </p>
+                              <p>
+                                邮箱：
+                                {item.publisher_contact_email || "未填写"}
+                              </p>
+                            </div>
+                          </div>
+
+                          {item.rejected_reason ? (
+                            <div className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700">
+                              审核未通过原因：{item.rejected_reason}
+                            </div>
+                          ) : null}
+
+                          {item.remark ? (
+                            <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                              备注：{item.remark}
+                            </div>
+                          ) : null}
+
+                          <p className="mt-3 text-xs text-slate-400">
+                            发布时间：{formatDate(item.created_at)}
+                          </p>
                         </div>
 
-                        <div className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <p className="font-bold text-slate-800">发布方</p>
-                          <div className="mt-2 grid gap-1 md:grid-cols-2">
-                            <p>
-                              企业：
-                              {item.publisher_company_name || "未填写"}
-                            </p>
-                            <p>
-                              联系人：
-                              {item.publisher_contact_name || "未填写"}
-                            </p>
-                            <p>
-                              电话：
-                              {item.publisher_contact_phone || "未填写"}
-                            </p>
-                            <p>
-                              邮箱：
-                              {item.publisher_contact_email || "未填写"}
-                            </p>
-                          </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => approveCargo(item.id)}
+                            disabled={updatingId === item.id}
+                            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-400"
+                          >
+                            通过
+                          </button>
+
+                          <button
+                            onClick={() => rejectCargo(item.id)}
+                            disabled={updatingId === item.id}
+                            className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:bg-slate-400"
+                          >
+                            驳回
+                          </button>
+
+                          <button
+                            onClick={() => closeCargo(item.id)}
+                            disabled={updatingId === item.id}
+                            className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                          >
+                            关闭
+                          </button>
                         </div>
-
-                        {item.rejected_reason ? (
-                          <div className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700">
-                            审核未通过原因：{item.rejected_reason}
-                          </div>
-                        ) : null}
-
-                        {item.remark ? (
-                          <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
-                            备注：{item.remark}
-                          </div>
-                        ) : null}
-
-                        <p className="mt-3 text-xs text-slate-400">
-                          发布时间：{formatDate(item.created_at)}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => approveCargo(item.id)}
-                          disabled={updatingId === item.id}
-                          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-400"
-                        >
-                          通过
-                        </button>
-
-                        <button
-                          onClick={() => rejectCargo(item.id)}
-                          disabled={updatingId === item.id}
-                          className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:bg-slate-400"
-                        >
-                          驳回
-                        </button>
-
-                        <button
-                          onClick={() => closeCargo(item.id)}
-                          disabled={updatingId === item.id}
-                          className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-                        >
-                          关闭
-                        </button>
                       </div>
                     </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <span>每页显示</span>
+                    <select
+                      value={pageSize}
+                      onChange={(event) =>
+                        setPageSize(Number(event.target.value))
+                      }
+                      className="rounded-xl border bg-white px-3 py-2 text-sm"
+                    >
+                      <option value={10}>10 条</option>
+                      <option value={20}>20 条</option>
+                      <option value={50}>50 条</option>
+                    </select>
                   </div>
-                ))}
-              </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(1, prev - 1))
+                      }
+                      disabled={safeCurrentPage <= 1}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      上一页
+                    </button>
+
+                    <span className="text-sm text-slate-600">
+                      第 {safeCurrentPage} / {totalPages} 页
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((prev) =>
+                          Math.min(totalPages, prev + 1)
+                        )
+                      }
+                      disabled={safeCurrentPage >= totalPages}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </section>
         )}
