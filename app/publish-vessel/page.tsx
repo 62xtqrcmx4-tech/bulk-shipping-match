@@ -5,6 +5,15 @@ import type { FormEvent } from "react";
 import { supabase } from "../../lib/supabase";
 import PageHeader from "../../components/PageHeader";
 
+type CompanyProfile = {
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string | null;
+  verification_status: string;
+  business_license_path: string | null;
+  rejected_reason: string | null;
+};
+
 export default function PublishVesselPage() {
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +36,9 @@ export default function PublishVesselPage() {
 
     const { data: profileData, error: profileError } = await supabase
       .from("company_verification")
-      .select("contact_name, contact_phone, contact_email")
+      .select(
+        "contact_name, contact_phone, contact_email, verification_status, business_license_path, rejected_reason"
+      )
       .eq("user_id", currentUserId)
       .maybeSingle();
 
@@ -41,6 +52,24 @@ export default function PublishVesselPage() {
       alert("未找到企业资料，请先完成注册和企业资料提交。");
       setLoading(false);
       window.location.href = "/register";
+      return;
+    }
+
+    const profile = profileData as CompanyProfile;
+
+    if (!profile.business_license_path) {
+      alert("请先上传营业执照或企业资质文件后再发布船源。");
+      setLoading(false);
+      return;
+    }
+
+    if (profile.verification_status === "rejected") {
+      alert(
+        `企业认证已被驳回，暂不能发布船源。驳回原因：${
+          profile.rejected_reason || "未填写"
+        }`
+      );
+      setLoading(false);
       return;
     }
 
@@ -77,7 +106,6 @@ export default function PublishVesselPage() {
 
       vessel_type: String(formData.get("vessel_type")),
 
-      // 数据库字段暂时仍用 dwt 存储“运力规模数值”
       dwt: capacityValue,
       capacity_unit: String(formData.get("capacity_unit")),
 
@@ -103,9 +131,9 @@ export default function PublishVesselPage() {
 
       remark: String(formData.get("remark") || ""),
 
-      contact_name: profileData.contact_name,
-      contact_phone: profileData.contact_phone,
-      contact_email: profileData.contact_email || userData.user.email || "",
+      contact_name: profile.contact_name,
+      contact_phone: profile.contact_phone,
+      contact_email: profile.contact_email || userData.user.email || "",
 
       information_expiry_date: String(formData.get("information_expiry_date")),
 
@@ -122,8 +150,13 @@ export default function PublishVesselPage() {
       return;
     }
 
-    alert("船源已提交，等待平台审核。");
-    window.location.href = "/vessels";
+    if (profile.verification_status === "approved") {
+      alert("船源已提交，等待平台审核。");
+    } else {
+      alert("船源已提交，等待平台审核。当前企业证照已提交，平台认证仍在审核中。");
+    }
+
+    window.location.href = "/my-vessels";
   }
 
   return (
@@ -136,6 +169,10 @@ export default function PublishVesselPage() {
       </div>
 
       <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+        <div className="mb-6 rounded-2xl bg-blue-50 p-4 text-sm text-blue-700 ring-1 ring-blue-100">
+          发布船源前需已提交企业资料和营业执照。企业认证待审核期间仍可提交船源，但前台将显示“证照已提交，待审核”。
+        </div>
+
         <form onSubmit={handleSubmit} className="grid gap-5">
           <div className="grid gap-5 md:grid-cols-2">
             <label className="grid gap-2">
@@ -353,7 +390,7 @@ export default function PublishVesselPage() {
               placeholder="例如：可接集装箱、可接重大件、可接袋装粮、支持甲板货、可配吊装、可接需绑扎货物等"
             />
             <span className="text-sm text-slate-500">
-              备注内容将支持关键词检索，适合填写可承接的特殊货物、装卸条件、绑扎能力、航线偏好等信息。
+              备注内容支持关键词检索，适合填写可承接的特殊货物、装卸条件、绑扎能力、航线偏好等信息。
             </span>
           </label>
 
