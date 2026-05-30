@@ -4,7 +4,7 @@ import SiteHeader from "../components/SiteHeader";
 
 export const metadata: Metadata = {
   title: "DMU船货匹配平台",
-  description: "Bulk Shipping Match Platform",
+  description: "辽宁省智慧交通与港航物流工程研究中心",
 };
 
 export default function RootLayout({
