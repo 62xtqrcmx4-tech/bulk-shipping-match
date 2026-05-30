@@ -13,8 +13,12 @@ type ContactRequest = {
   request_type: string;
   status: string;
   created_at: string;
+  contact_opened_at: string | null;
+
   requester_company_name?: string;
   requester_contact_name?: string;
+  requester_contact_phone?: string;
+  requester_contact_email?: string;
 };
 
 type VesselSupply = {
@@ -44,6 +48,8 @@ type CompanyProfile = {
   user_id: string;
   company_name: string;
   contact_name: string;
+  contact_phone: string;
+  contact_email: string;
 };
 
 function formatTransportType(type: string) {
@@ -76,10 +82,10 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString("zh-CN");
 }
 
-function getContactDisplayName(contact: ContactRequest) {
-  const company = contact.requester_company_name || "未知货方公司";
-  const person = contact.requester_contact_name || "未填写联系人";
-  return `${company}｜${person}`;
+function formatContactType(type: string) {
+  if (type === "cargo_to_vessel") return "货方联系船源";
+  if (type === "vessel_to_cargo") return "船方联系货源";
+  return type || "联系申请";
 }
 
 export default function MyVesselsPage() {
@@ -134,7 +140,7 @@ export default function MyVesselsPage() {
     const { data: contactData, error: contactError } = await supabase
       .from("contact_request")
       .select(
-        "id, requester_id, target_user_id, cargo_demand_id, vessel_supply_id, request_type, status, created_at"
+        "id, requester_id, target_user_id, cargo_demand_id, vessel_supply_id, request_type, status, created_at, contact_opened_at"
       )
       .in("vessel_supply_id", vesselIds)
       .order("created_at", { ascending: false });
@@ -157,11 +163,15 @@ export default function MyVesselsPage() {
     if (requesterIds.length > 0) {
       const { data: profileData, error: profileError } = await supabase
         .from("company_verification")
-        .select("user_id, company_name, contact_name")
+        .select(
+          "user_id, company_name, contact_name, contact_phone, contact_email"
+        )
         .in("user_id", requesterIds);
 
       if (!profileError) {
         profiles = (profileData || []) as CompanyProfile[];
+      } else {
+        console.error(profileError);
       }
     }
 
@@ -180,6 +190,8 @@ export default function MyVesselsPage() {
         ...contact,
         requester_company_name: profile?.company_name || "",
         requester_contact_name: profile?.contact_name || "",
+        requester_contact_phone: profile?.contact_phone || "",
+        requester_contact_email: profile?.contact_email || "",
       };
     });
 
@@ -252,6 +264,11 @@ export default function MyVesselsPage() {
                 [
                   contact.requester_company_name || "",
                   contact.requester_contact_name || "",
+                  contact.requester_contact_phone || "",
+                  contact.requester_contact_email || "",
+                  formatContactType(contact.request_type),
+                  contact.created_at,
+                  contact.contact_opened_at || "",
                 ].join(" ")
               )
               .join(" "),
@@ -305,12 +322,18 @@ export default function MyVesselsPage() {
     setKeyword("");
   }
 
+  function getContactDisplayName(contact: ContactRequest) {
+    const company = contact.requester_company_name || "未填写企业名称";
+    const person = contact.requester_contact_name || "未填写联系人";
+    return `${company}｜${person}`;
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="我发布的船源"
-          description="管理我发布的船源信息，查看联系过该船源的货方，并关闭已失效的船源。"
+          description="管理我发布的船源信息，查看联系该船源的货方，并关闭已失效的船源。"
           actionHref="/publish-vessel"
           actionText="发布船源"
         />
@@ -481,7 +504,9 @@ export default function MyVesselsPage() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => closeVessel(item.id)}
-                        disabled={updatingId === item.id || item.status === "closed"}
+                        disabled={
+                          updatingId === item.id || item.status === "closed"
+                        }
                         className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
                         关闭船源
@@ -506,10 +531,28 @@ export default function MyVesselsPage() {
                             <p className="font-medium">
                               {getContactDisplayName(contact)}
                             </p>
-                            <p className="mt-1 text-slate-500">
-                              联系时间：{formatDate(contact.created_at)}｜状态：
-                              {contact.status}
-                            </p>
+
+                            <div className="mt-2 grid gap-1 text-slate-500 md:grid-cols-2">
+                              <p>
+                                联系电话：
+                                {contact.requester_contact_phone || "未填写"}
+                              </p>
+                              <p>
+                                联系邮箱：
+                                {contact.requester_contact_email || "未填写"}
+                              </p>
+                              <p>
+                                联系类型：
+                                {formatContactType(contact.request_type)}
+                              </p>
+                              <p>
+                                申请时间：{formatDate(contact.created_at)}
+                              </p>
+                              <p>
+                                开放时间：
+                                {formatDate(contact.contact_opened_at)}
+                              </p>
+                            </div>
                           </div>
                         ))}
                       </div>
