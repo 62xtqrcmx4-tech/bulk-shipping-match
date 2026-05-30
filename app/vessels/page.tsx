@@ -27,14 +27,12 @@ type VesselSupply = {
 
   publisher_company_name?: string;
   publisher_verification_status?: string;
-  publisher_business_license_path?: string | null;
 };
 
 type CompanyProfile = {
   user_id: string;
   company_name: string;
   verification_status: string;
-  business_license_path: string | null;
 };
 
 type CurrentUserProfile = {
@@ -186,10 +184,8 @@ export default function VesselsPage() {
 
     if (publisherIds.length > 0) {
       const { data: profileData, error: profileError } = await supabase
-        .from("company_verification")
-        .select(
-          "user_id, company_name, verification_status, business_license_path"
-        )
+        .from("public_company_profiles")
+        .select("user_id, company_name, verification_status")
         .in("user_id", publisherIds);
 
       if (!profileError) {
@@ -214,7 +210,6 @@ export default function VesselsPage() {
         ...vessel,
         publisher_company_name: profile?.company_name || "",
         publisher_verification_status: profile?.verification_status || "",
-        publisher_business_license_path: profile?.business_license_path || null,
       };
     });
 
