@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { supabase } from "../../lib/supabase";
 import PageHeader from "../../components/PageHeader";
 
@@ -61,7 +62,9 @@ function formatDate(value: string | null) {
 export default function MyProfilePage() {
   const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [userEmail, setUserEmail] = useState("");
+  const [userId, setUserId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   async function fetchProfile() {
     setLoading(true);
@@ -74,6 +77,7 @@ export default function MyProfilePage() {
       return;
     }
 
+    setUserId(userData.user.id);
     setUserEmail(userData.user.email || "");
 
     const { data, error } = await supabase
@@ -116,12 +120,105 @@ export default function MyProfilePage() {
     window.open(data.signedUrl, "_blank");
   }
 
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!profile || !userId) {
+      alert("未找到企业资料，无法保存。");
+      return;
+    }
+
+    setSaving(true);
+
+    const formData = new FormData(event.currentTarget);
+
+    const licenseFile = formData.get("business_license") as File | null;
+
+    let newLicensePath = profile.business_license_path;
+    let newLicenseUploadedAt = profile.business_license_uploaded_at;
+
+    if (licenseFile && licenseFile.size > 0) {
+      if (licenseFile.size > 10 * 1024 * 1024) {
+        alert("营业执照文件不能超过 10MB。");
+        setSaving(false);
+        return;
+      }
+
+      const allowedTypes = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "application/pdf",
+      ];
+
+      if (!allowedTypes.includes(licenseFile.type)) {
+        alert("营业执照仅支持 JPG、PNG、WEBP 或 PDF 文件。");
+        setSaving(false);
+        return;
+      }
+
+      const fileExt = licenseFile.name.split(".").pop() || "file";
+      const filePath = `${userId}/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("business-licenses")
+        .upload(filePath, licenseFile, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        alert(`营业执照上传失败：${uploadError.message}`);
+        setSaving(false);
+        return;
+      }
+
+      newLicensePath = filePath;
+      newLicenseUploadedAt = new Date().toISOString();
+    }
+
+    const payload = {
+      user_type: String(formData.get("user_type")),
+      company_name: String(formData.get("company_name")),
+      unified_social_credit_code: String(
+        formData.get("unified_social_credit_code") || ""
+      ),
+      company_type: String(formData.get("company_type")),
+      contact_name: String(formData.get("contact_name")),
+      contact_phone: String(formData.get("contact_phone")),
+      contact_email: String(formData.get("contact_email") || userEmail),
+      main_business: String(formData.get("main_business") || ""),
+      business_license_path: newLicensePath,
+      business_license_uploaded_at: newLicenseUploadedAt,
+
+      // 用户修改资料或重新上传证照后，重新进入待审核状态
+      verification_status: "pending",
+      rejected_reason: null,
+      verified_at: null,
+    };
+
+    const { error } = await supabase
+      .from("company_verification")
+      .update(payload)
+      .eq("id", profile.id);
+
+    setSaving(false);
+
+    if (error) {
+      alert(`保存企业资料失败：${error.message}`);
+      return;
+    }
+
+    alert("企业资料已保存，并重新提交审核。");
+    await fetchProfile();
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-5xl">
         <PageHeader
           title="我的资料"
-          description="查看我的企业资料、营业执照上传状态和平台认证状态。"
+          description="查看和维护我的企业资料、营业执照上传状态和平台认证状态。"
         />
 
         {loading ? (
@@ -142,7 +239,7 @@ export default function MyProfilePage() {
             </a>
           </div>
         ) : (
-          <div className="grid gap-6">
+          <form onSubmit={handleSave} className="grid gap-6">
             <section className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -151,7 +248,11 @@ export default function MyProfilePage() {
                       {profile.company_name}
                     </h2>
 
-                    <span className={getVerificationBadgeClass(profile.verification_status)}>
+                    <span
+                      className={getVerificationBadgeClass(
+                        profile.verification_status
+                      )}
+                    >
                       {formatVerificationStatus(profile.verification_status)}
                     </span>
 
@@ -172,11 +273,12 @@ export default function MyProfilePage() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={viewBusinessLicense}
                   disabled={!profile.business_license_path}
                   className="rounded-xl border border-blue-700 px-5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
                 >
-                  查看营业执照
+                  查看当前证照
                 </button>
               </div>
 
@@ -199,7 +301,7 @@ export default function MyProfilePage() {
                     驳回原因：{profile.rejected_reason || "未填写"}
                   </p>
                   <p className="mt-1">
-                    后续可在资料修改功能上线后重新提交资料和证照。
+                    请修改企业资料或重新上传营业执照后保存，系统会重新提交审核。
                   </p>
                 </div>
               ) : null}
@@ -208,53 +310,105 @@ export default function MyProfilePage() {
             <section className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
               <h3 className="text-xl font-bold">企业基础信息</h3>
 
-              <div className="mt-5 grid gap-4 text-sm text-slate-700 md:grid-cols-2">
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">用户类型</p>
-                  <p className="mt-1 font-medium">
-                    {formatUserType(profile.user_type)}
-                  </p>
-                </div>
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="font-medium">用户类型</span>
+                  <select
+                    name="user_type"
+                    required
+                    defaultValue={profile.user_type}
+                    className="rounded-xl border px-3 py-3"
+                  >
+                    <option value="cargo_owner">货方</option>
+                    <option value="vessel_owner">船方</option>
+                    <option value="broker">经纪 / 服务方</option>
+                  </select>
+                </label>
 
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">企业类型</p>
-                  <p className="mt-1 font-medium">{profile.company_type}</p>
-                </div>
+                <label className="grid gap-2">
+                  <span className="font-medium">企业类型</span>
+                  <select
+                    name="company_type"
+                    required
+                    defaultValue={profile.company_type}
+                    className="rounded-xl border px-3 py-3"
+                  >
+                    <option>货主</option>
+                    <option>贸易商</option>
+                    <option>船东</option>
+                    <option>船代</option>
+                    <option>航运企业</option>
+                    <option>物流公司</option>
+                    <option>经纪人</option>
+                    <option>其他</option>
+                  </select>
+                </label>
 
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">统一社会信用代码</p>
-                  <p className="mt-1 font-medium">
-                    {profile.unified_social_credit_code || "未填写"}
-                  </p>
-                </div>
+                <label className="grid gap-2 md:col-span-2">
+                  <span className="font-medium">企业名称</span>
+                  <input
+                    name="company_name"
+                    required
+                    defaultValue={profile.company_name}
+                    className="rounded-xl border px-3 py-3"
+                  />
+                </label>
 
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">主营业务</p>
-                  <p className="mt-1 font-medium">
-                    {profile.main_business || "未填写"}
-                  </p>
-                </div>
+                <label className="grid gap-2">
+                  <span className="font-medium">统一社会信用代码，可选</span>
+                  <input
+                    name="unified_social_credit_code"
+                    defaultValue={profile.unified_social_credit_code || ""}
+                    className="rounded-xl border px-3 py-3"
+                  />
+                </label>
+
+                <label className="grid gap-2">
+                  <span className="font-medium">联系邮箱</span>
+                  <input
+                    name="contact_email"
+                    type="email"
+                    required
+                    defaultValue={profile.contact_email || userEmail}
+                    className="rounded-xl border px-3 py-3"
+                  />
+                </label>
+
+                <label className="grid gap-2 md:col-span-2">
+                  <span className="font-medium">主营业务，可选</span>
+                  <textarea
+                    name="main_business"
+                    defaultValue={profile.main_business || ""}
+                    className="min-h-24 rounded-xl border px-3 py-3"
+                    placeholder="例如：铁矿石贸易、沿海散货运输、煤炭物流等"
+                  />
+                </label>
               </div>
             </section>
 
             <section className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
               <h3 className="text-xl font-bold">联系人信息</h3>
 
-              <div className="mt-5 grid gap-4 text-sm text-slate-700 md:grid-cols-3">
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">联系人</p>
-                  <p className="mt-1 font-medium">{profile.contact_name}</p>
-                </div>
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="font-medium">联系人</span>
+                  <input
+                    name="contact_name"
+                    required
+                    defaultValue={profile.contact_name}
+                    className="rounded-xl border px-3 py-3"
+                  />
+                </label>
 
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">联系电话</p>
-                  <p className="mt-1 font-medium">{profile.contact_phone}</p>
-                </div>
-
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">联系邮箱</p>
-                  <p className="mt-1 font-medium">{profile.contact_email}</p>
-                </div>
+                <label className="grid gap-2">
+                  <span className="font-medium">联系电话</span>
+                  <input
+                    name="contact_phone"
+                    required
+                    defaultValue={profile.contact_phone}
+                    className="rounded-xl border px-3 py-3"
+                  />
+                </label>
               </div>
             </section>
 
@@ -263,14 +417,14 @@ export default function MyProfilePage() {
 
               <div className="mt-5 grid gap-4 text-sm text-slate-700 md:grid-cols-2">
                 <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">证照文件状态</p>
+                  <p className="text-slate-500">当前证照文件状态</p>
                   <p className="mt-1 font-medium">
                     {profile.business_license_path ? "已上传" : "未上传"}
                   </p>
                 </div>
 
                 <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-slate-500">证照上传时间</p>
+                  <p className="text-slate-500">当前证照上传时间</p>
                   <p className="mt-1 font-medium">
                     {formatDate(profile.business_license_uploaded_at)}
                   </p>
@@ -279,12 +433,44 @@ export default function MyProfilePage() {
 
               {profile.business_license_path ? (
                 <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                  <span className="font-medium text-slate-800">证照路径：</span>
+                  <span className="font-medium text-slate-800">当前证照路径：</span>
                   {profile.business_license_path}
                 </div>
               ) : null}
+
+              <label className="mt-5 grid gap-2">
+                <span className="font-medium">
+                  重新上传营业执照 / 企业资质文件，可选
+                </span>
+                <input
+                  name="business_license"
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf"
+                  className="rounded-xl border bg-white px-3 py-3"
+                />
+                <span className="text-sm text-slate-500">
+                  支持 JPG、PNG、WEBP、PDF，文件大小不超过 10MB。重新上传后，企业认证状态将变为“待审核”。
+                </span>
+              </label>
             </section>
-          </div>
+
+            <div className="flex flex-wrap justify-end gap-3">
+              <a
+                href="/"
+                className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                返回首页
+              </a>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-xl bg-blue-700 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
+                {saving ? "保存中..." : "保存并重新提交审核"}
+              </button>
+            </div>
+          </form>
         )}
       </div>
     </main>
