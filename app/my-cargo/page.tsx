@@ -97,6 +97,9 @@ export default function MyCargoPage() {
   const [maxQuantity, setMaxQuantity] = useState("");
   const [keyword, setKeyword] = useState("");
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const [selectedContactByCargoId, setSelectedContactByCargoId] = useState<
     Record<string, string>
   >({});
@@ -214,6 +217,18 @@ export default function MyCargoPage() {
     fetchMyCargo();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    statusFilter,
+    transportTypeFilter,
+    cargoTypeFilter,
+    minQuantity,
+    maxQuantity,
+    keyword,
+    pageSize,
+  ]);
+
   const filteredCargoList = cargoList.filter((item) => {
     const contacts = item.contacts || [];
 
@@ -281,6 +296,15 @@ export default function MyCargoPage() {
       matchKeyword
     );
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredCargoList.length / pageSize));
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedCargoList = filteredCargoList.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize
+  );
 
   async function closeCargo(cargoId: string) {
     const confirmed = window.confirm("确认关闭该订单吗？关闭后前台将不再展示。");
@@ -365,6 +389,7 @@ export default function MyCargoPage() {
     setMinQuantity("");
     setMaxQuantity("");
     setKeyword("");
+    setCurrentPage(1);
   }
 
   function getContactDisplayName(contact: ContactRequest) {
@@ -406,6 +431,7 @@ export default function MyCargoPage() {
             <option value="all">全部运输类型</option>
             <option value="domestic">内贸</option>
             <option value="international">外贸</option>
+            <option value="both">均可</option>
           </select>
 
           <select
@@ -461,7 +487,8 @@ export default function MyCargoPage() {
         </div>
 
         <div className="mb-4 text-sm text-slate-500">
-          共 {cargoList.length} 条订单，当前显示 {filteredCargoList.length} 条。
+          共 {cargoList.length} 条订单，筛选后 {filteredCargoList.length} 条，
+          当前第 {safeCurrentPage} / {totalPages} 页。
         </div>
 
         {loading ? (
@@ -477,186 +504,238 @@ export default function MyCargoPage() {
             没有符合筛选条件的订单。
           </div>
         ) : (
-          <div className="grid gap-6">
-            {filteredCargoList.map((item) => {
-              const contacts = item.contacts || [];
-              const canOperate =
-                item.status !== "closed" && item.status !== "completed";
+          <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div className="grid gap-6">
+              {paginatedCargoList.map((item) => {
+                const contacts = item.contacts || [];
+                const canOperate =
+                  item.status !== "closed" && item.status !== "completed";
 
-              return (
-                <div
-                  key={item.id}
-                  className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h2 className="text-xl font-bold">{item.cargo_type}</h2>
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200 p-5"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h2 className="text-xl font-bold">
+                            {item.cargo_type}
+                          </h2>
 
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                          {formatTransportType(item.transport_type)}
-                        </span>
-
-                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                          {formatStatus(item.status)}
-                        </span>
-                      </div>
-
-                      <p className="mt-2 text-slate-600">
-                        {item.loading_port} → {item.discharge_port}
-                      </p>
-
-                      <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
-                        <p>
-                          货量：{item.cargo_quantity}{" "}
-                          {formatCargoUnit(item.cargo_unit)}
-                        </p>
-                        <p>计划装货：{item.planned_loading_date}</p>
-                        <p>期望船型：{item.expected_vessel_type}</p>
-                        <p>有效期至：{item.information_expiry_date}</p>
-                      </div>
-
-                      {item.status === "rejected" && item.rejected_reason ? (
-                        <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
-                          <span className="font-semibold">审核未通过原因：</span>
-                          {item.rejected_reason}
-                        </div>
-                      ) : null}
-
-                      {item.remark ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <span className="font-medium text-slate-800">
-                            备注：
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                            {formatTransportType(item.transport_type)}
                           </span>
-                          {item.remark}
+
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                            {formatStatus(item.status)}
+                          </span>
                         </div>
-                      ) : null}
-                    </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => closeCargo(item.id)}
-                        disabled={updatingId === item.id || !canOperate}
-                        className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-                      >
-                        关闭订单
-                      </button>
-                    </div>
-                  </div>
+                        <p className="mt-2 text-slate-600">
+                          {item.loading_port} → {item.discharge_port}
+                        </p>
 
-                  <div className="mt-6 border-t pt-5">
-                    <h3 className="font-bold">联系过该订单的船方</h3>
+                        <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
+                          <p>
+                            货量：{item.cargo_quantity}{" "}
+                            {formatCargoUnit(item.cargo_unit)}
+                          </p>
+                          <p>计划装货：{item.planned_loading_date}</p>
+                          <p>期望船型：{item.expected_vessel_type}</p>
+                          <p>有效期至：{item.information_expiry_date}</p>
+                        </div>
 
-                    {contacts.length === 0 ? (
-                      <p className="mt-3 text-sm text-slate-500">
-                        暂无船方联系该订单。
-                      </p>
-                    ) : (
-                      <div className="mt-3 grid gap-3">
-                        {contacts.map((contact) => (
-                          <div
-                            key={contact.id}
-                            className="flex flex-wrap items-start justify-between gap-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
-                          >
-                            <div>
-                              <p className="font-medium">
-                                {getContactDisplayName(contact)}
-                              </p>
-
-                              <div className="mt-2 grid gap-1 text-slate-500 md:grid-cols-2">
-                                <p>
-                                  联系电话：
-                                  {contact.requester_contact_phone || "未填写"}
-                                </p>
-                                <p>
-                                  联系邮箱：
-                                  {contact.requester_contact_email || "未填写"}
-                                </p>
-                                <p>
-                                  联系类型：
-                                  {formatContactType(contact.request_type)}
-                                </p>
-                                <p>
-                                  申请时间：{formatDate(contact.created_at)}
-                                </p>
-                                <p>
-                                  开放时间：
-                                  {formatDate(contact.contact_opened_at)}
-                                </p>
-                              </div>
-                            </div>
-
-                            <a
-                              href={`/feedback?contactId=${contact.id}`}
-                              className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                            >
-                              评价该船方
-                            </a>
+                        {item.status === "rejected" &&
+                        item.rejected_reason ? (
+                          <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
+                            <span className="font-semibold">
+                              审核未通过原因：
+                            </span>
+                            {item.rejected_reason}
                           </div>
-                        ))}
+                        ) : null}
+
+                        {item.remark ? (
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <span className="font-medium text-slate-800">
+                              备注：
+                            </span>
+                            {item.remark}
+                          </div>
+                        ) : null}
                       </div>
-                    )}
-                  </div>
 
-                  {canOperate ? (
-                    <div className="mt-6 rounded-2xl bg-emerald-50 p-5 ring-1 ring-emerald-100">
-                      <h3 className="font-bold text-emerald-900">
-                        标记订单完成
-                      </h3>
-                      <p className="mt-2 text-sm text-emerald-700">
-                        请选择最终完成该订单的船方，系统将把该货源标记为已完成。
-                      </p>
-
-                      <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto]">
-                        <select
-                          value={selectedContactByCargoId[item.id] || ""}
-                          onChange={(event) =>
-                            setSelectedContactByCargoId((prev) => ({
-                              ...prev,
-                              [item.id]: event.target.value,
-                            }))
-                          }
-                          className="rounded-xl border px-3 py-3"
-                        >
-                          <option value="">请选择成交船方</option>
-                          {contacts.map((contact) => (
-                            <option key={contact.id} value={contact.id}>
-                              {getContactDisplayName(contact)}
-                            </option>
-                          ))}
-                        </select>
-
-                        <input
-                          value={completionNoteByCargoId[item.id] || ""}
-                          onChange={(event) =>
-                            setCompletionNoteByCargoId((prev) => ({
-                              ...prev,
-                              [item.id]: event.target.value,
-                            }))
-                          }
-                          className="rounded-xl border px-3 py-3"
-                          placeholder="完成备注，可选"
-                        />
-
+                      <div className="flex flex-wrap gap-2">
                         <button
-                          type="button"
-                          onClick={() => completeCargo(item)}
-                          disabled={
-                            updatingId === item.id ||
-                            contacts.length === 0 ||
-                            !selectedContactByCargoId[item.id]
-                          }
-                          className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                          onClick={() => closeCargo(item.id)}
+                          disabled={updatingId === item.id || !canOperate}
+                          className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                         >
-                          确认完成
+                          关闭订单
                         </button>
                       </div>
                     </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
+
+                    <div className="mt-6 border-t pt-5">
+                      <h3 className="font-bold">联系过该订单的船方</h3>
+
+                      {contacts.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-500">
+                          暂无船方联系该订单。
+                        </p>
+                      ) : (
+                        <div className="mt-3 grid gap-3">
+                          {contacts.map((contact) => (
+                            <div
+                              key={contact.id}
+                              className="flex flex-wrap items-start justify-between gap-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
+                            >
+                              <div>
+                                <p className="font-medium">
+                                  {getContactDisplayName(contact)}
+                                </p>
+
+                                <div className="mt-2 grid gap-1 text-slate-500 md:grid-cols-2">
+                                  <p>
+                                    联系电话：
+                                    {contact.requester_contact_phone ||
+                                      "未填写"}
+                                  </p>
+                                  <p>
+                                    联系邮箱：
+                                    {contact.requester_contact_email ||
+                                      "未填写"}
+                                  </p>
+                                  <p>
+                                    联系类型：
+                                    {formatContactType(contact.request_type)}
+                                  </p>
+                                  <p>
+                                    申请时间：{formatDate(contact.created_at)}
+                                  </p>
+                                  <p>
+                                    开放时间：
+                                    {formatDate(contact.contact_opened_at)}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <a
+                                href={`/feedback?contactId=${contact.id}`}
+                                className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                              >
+                                评价该船方
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {canOperate ? (
+                      <div className="mt-6 rounded-2xl bg-emerald-50 p-5 ring-1 ring-emerald-100">
+                        <h3 className="font-bold text-emerald-900">
+                          标记订单完成
+                        </h3>
+                        <p className="mt-2 text-sm text-emerald-700">
+                          请选择最终完成该订单的船方，系统将把该货源标记为已完成。
+                        </p>
+
+                        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+                          <select
+                            value={selectedContactByCargoId[item.id] || ""}
+                            onChange={(event) =>
+                              setSelectedContactByCargoId((prev) => ({
+                                ...prev,
+                                [item.id]: event.target.value,
+                              }))
+                            }
+                            className="rounded-xl border px-3 py-3"
+                          >
+                            <option value="">请选择成交船方</option>
+                            {contacts.map((contact) => (
+                              <option key={contact.id} value={contact.id}>
+                                {getContactDisplayName(contact)}
+                              </option>
+                            ))}
+                          </select>
+
+                          <input
+                            value={completionNoteByCargoId[item.id] || ""}
+                            onChange={(event) =>
+                              setCompletionNoteByCargoId((prev) => ({
+                                ...prev,
+                                [item.id]: event.target.value,
+                              }))
+                            }
+                            className="rounded-xl border px-3 py-3"
+                            placeholder="完成备注，可选"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => completeCargo(item)}
+                            disabled={
+                              updatingId === item.id ||
+                              contacts.length === 0 ||
+                              !selectedContactByCargoId[item.id]
+                            }
+                            className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                          >
+                            确认完成
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>每页显示</span>
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value))}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value={10}>10 条</option>
+                  <option value={20}>20 条</option>
+                  <option value={50}>50 条</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(1, prev - 1))
+                  }
+                  disabled={safeCurrentPage <= 1}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  上一页
+                </button>
+
+                <span className="text-sm text-slate-600">
+                  第 {safeCurrentPage} / {totalPages} 页
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                  }
+                  disabled={safeCurrentPage >= totalPages}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </section>
         )}
       </div>
     </main>
