@@ -24,6 +24,17 @@ type VesselSupply = {
   status: string;
   remark: string | null;
   created_at: string;
+
+  publisher_company_name?: string;
+  publisher_verification_status?: string;
+  publisher_business_license_path?: string | null;
+};
+
+type CompanyProfile = {
+  user_id: string;
+  company_name: string;
+  verification_status: string;
+  business_license_path: string | null;
 };
 
 function formatTransportType(type: string) {
@@ -50,8 +61,33 @@ function formatCapacityUnit(unit: string | null) {
   return unit;
 }
 
+function formatVerificationStatus(status?: string, licensePath?: string | null) {
+  if (status === "approved") return "已认证";
+  if (status === "pending" && licensePath) return "证照已提交，待审核";
+  if (status === "rejected") return "认证驳回";
+  if (licensePath) return "证照已提交";
+  return "未认证";
+}
+
+function getVerificationBadgeClass(status?: string) {
+  if (status === "approved") {
+    return "rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700";
+  }
+
+  if (status === "pending") {
+    return "rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700";
+  }
+
+  if (status === "rejected") {
+    return "rounded-full bg-red-50 px-3 py-1 text-xs text-red-700";
+  }
+
+  return "rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600";
+}
+
 export default function VesselsPage() {
   const [vesselList, setVesselList] = useState<VesselSupply[]>([]);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [contactingId, setContactingId] = useState<string | null>(null);
@@ -69,6 +105,10 @@ export default function VesselsPage() {
       setLoading(true);
       setErrorMessage("");
 
+      const { data: userData } = await supabase.auth.getUser();
+      const loggedIn = !!userData.user;
+      setIsLoggedIn(loggedIn);
+
       const { data, error } = await supabase
         .from("vessel_supply")
         .select(
@@ -79,14 +119,68 @@ export default function VesselsPage() {
 
       if (error) {
         setErrorMessage(error.message);
-      } else {
-        const publishedOnly = ((data || []) as VesselSupply[]).filter(
-          (item) => item.status === "published"
-        );
-
-        setVesselList(publishedOnly);
+        setLoading(false);
+        return;
       }
 
+      const publishedOnly = ((data || []) as VesselSupply[]).filter(
+        (item) => item.status === "published"
+      );
+
+      if (publishedOnly.length === 0) {
+        setVesselList([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!loggedIn) {
+        setVesselList(publishedOnly);
+        setLoading(false);
+        return;
+      }
+
+      const publisherIds = Array.from(
+        new Set(publishedOnly.map((item) => item.publisher_id).filter(Boolean))
+      );
+
+      let profiles: CompanyProfile[] = [];
+
+      if (publisherIds.length > 0) {
+        const { data: profileData, error: profileError } = await supabase
+          .from("company_verification")
+          .select(
+            "user_id, company_name, verification_status, business_license_path"
+          )
+          .in("user_id", publisherIds);
+
+        if (profileError) {
+          console.error(profileError);
+        } else {
+          profiles = (profileData || []) as CompanyProfile[];
+        }
+      }
+
+      const profileMap = new Map<string, CompanyProfile>();
+
+      profiles.forEach((profile) => {
+        if (!profileMap.has(profile.user_id)) {
+          profileMap.set(profile.user_id, profile);
+        }
+      });
+
+      const merged = publishedOnly.map((vessel) => {
+        const profile = profileMap.get(vessel.publisher_id);
+
+        return {
+          ...vessel,
+          publisher_company_name: profile?.company_name || "未公开企业名称",
+          publisher_verification_status: profile?.verification_status || "",
+          publisher_business_license_path:
+            profile?.business_license_path || null,
+        };
+      });
+
+      setVesselList(merged);
       setLoading(false);
     }
 
@@ -150,6 +244,7 @@ export default function VesselsPage() {
             item.service_area,
             item.regular_route || "",
             item.remark || "",
+            isLoggedIn ? item.publisher_company_name || "" : "",
           ]
             .join(" ")
             .toLowerCase()
@@ -228,6 +323,12 @@ export default function VesselsPage() {
           actionHref="/publish-vessel"
           actionText="发布船源"
         />
+
+        {!isLoggedIn ? (
+          <div className="mb-6 rounded-2xl bg-blue-50 p-4 text-sm text-blue-700 ring-1 ring-blue-100">
+            当前为游客浏览模式。登录后可查看发布方企业名称和认证状态，并可申请联系。
+          </div>
+        ) : null}
 
         <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-7">
           <select
@@ -349,6 +450,19 @@ export default function VesselsPage() {
                         {formatStatus(item.status)}
                       </span>
 
+                      {isLoggedIn ? (
+                        <span
+                          className={getVerificationBadgeClass(
+                            item.publisher_verification_status
+                          )}
+                        >
+                          {formatVerificationStatus(
+                            item.publisher_verification_status,
+                            item.publisher_business_license_path
+                          )}
+                        </span>
+                      ) : null}
+
                       {item.is_ballast_return ? (
                         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
                           返程空载
@@ -368,6 +482,17 @@ export default function VesselsPage() {
                         ? `；当前目的港：${item.current_destination_port}`
                         : ""}
                     </p>
+
+                    {isLoggedIn ? (
+                      <p className="mt-2 text-sm text-slate-500">
+                        发布方：
+                        {item.publisher_company_name || "未公开企业名称"}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-400">
+                        登录后可查看发布方企业信息
+                      </p>
+                    )}
                   </div>
 
                   <button
