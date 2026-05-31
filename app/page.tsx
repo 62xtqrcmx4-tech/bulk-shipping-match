@@ -5,7 +5,7 @@ export default function Home() {
         <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
           <div>
             <div className="inline-flex rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
-              面向大宗散货、集装箱货物与特种货的船货撮合原型系统
+              辽宁省智慧交通与港航物流工程研究中心 V0.1
             </div>
 
             <h1 className="mt-6 text-4xl font-bold leading-tight tracking-tight md:text-5xl">
