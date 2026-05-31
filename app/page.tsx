@@ -4,10 +4,6 @@ export default function Home() {
       <section className="mx-auto max-w-7xl px-6 py-16">
         <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
           <div>
-            <div className="inline-flex rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
-              辽宁省智慧交通与港航物流工程研究中心 V0.1
-            </div>
-
             <h1 className="mt-6 text-4xl font-bold leading-tight tracking-tight md:text-5xl">
               船源、货源、企业资质与联系申请的一体化撮合平台
             </h1>
@@ -68,7 +64,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 pb-16">
+      <section className="mx-auto max-w-7xl px-6 pb-8">
         <div className="grid gap-5 md:grid-cols-3">
           <a
             href="/publish-cargo"
@@ -129,6 +125,10 @@ export default function Home() {
               查看我发起或收到的联系申请记录。
             </p>
           </a>
+        </div>
+
+        <div className="mt-8 pl-4 text-sm font-medium text-blue-700">
+          辽宁省智慧交通与港航物流工程研究中心开发 V0.1
         </div>
       </section>
     </main>
