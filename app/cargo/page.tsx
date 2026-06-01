@@ -38,15 +38,6 @@ type CurrentUserProfile = {
   rejected_reason: string | null;
 };
 
-function getTodayString() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function isExpiredDate(value: string | null | undefined) {
-  if (!value) return false;
-  return value < getTodayString();
-}
-
 function formatTransportType(type: string) {
   if (type === "domestic") return "内贸";
   if (type === "international") return "外贸";
@@ -136,23 +127,6 @@ export default function CargoPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  async function expireOutdatedCargoDemands() {
-    const today = getTodayString();
-
-    const { error } = await supabase
-      .from("cargo_demand")
-      .update({
-        status: "expired",
-      })
-      .eq("status", "published")
-      .not("information_expiry_date", "is", null)
-      .lt("information_expiry_date", today);
-
-    if (error) {
-      console.error("自动关闭过期货源失败：", error);
-    }
-  }
-
   async function fetchCurrentUserProfile() {
     const { data: userData } = await supabase.auth.getUser();
 
@@ -183,9 +157,15 @@ export default function CargoPage() {
   async function fetchCargoList() {
     setLoading(true);
 
-    await expireOutdatedCargoDemands();
+    const { error: expireError } = await supabase.rpc(
+      "expire_outdated_listings"
+    );
 
-    const today = getTodayString();
+    if (expireError) {
+      console.error("过期信息处理失败：", expireError);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
 
     const { data: cargoData, error: cargoError } = await supabase
       .from("cargo_demand")
@@ -277,9 +257,6 @@ export default function CargoPage() {
   ]);
 
   const filteredCargoList = cargoList.filter((item) => {
-    if (item.status !== "published") return false;
-    if (isExpiredDate(item.information_expiry_date)) return false;
-
     const matchTransportType =
       transportTypeFilter === "all"
         ? true
@@ -367,9 +344,14 @@ export default function CargoPage() {
       return false;
     }
 
-    if (cargo.status !== "published" || isExpiredDate(cargo.information_expiry_date)) {
-      alert("该货源已过期或已关闭，不能再申请联系。");
-      fetchCargoList();
+    if (cargo.status !== "published") {
+      alert("该货源当前不可联系。");
+      return false;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (cargo.information_expiry_date < today) {
+      alert("该货源已过期，不能申请联系。");
       return false;
     }
 
@@ -411,30 +393,6 @@ export default function CargoPage() {
     if (!validateCanRequestContact(cargo)) return;
 
     setRequestingId(cargo.id);
-
-    const { data: latestCargo, error: latestCargoError } = await supabase
-      .from("cargo_demand")
-      .select("id, status, information_expiry_date")
-      .eq("id", cargo.id)
-      .maybeSingle();
-
-    if (latestCargoError) {
-      setRequestingId(null);
-      alert(`检查货源状态失败：${latestCargoError.message}`);
-      return;
-    }
-
-    if (
-      !latestCargo ||
-      latestCargo.status !== "published" ||
-      isExpiredDate(latestCargo.information_expiry_date)
-    ) {
-      await expireOutdatedCargoDemands();
-      setRequestingId(null);
-      alert("该货源已过期或已关闭，不能再申请联系。");
-      await fetchCargoList();
-      return;
-    }
 
     const { data: existingData, error: existingError } = await supabase
       .from("contact_request")
@@ -480,7 +438,7 @@ export default function CargoPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="货源大厅"
-          description="浏览已审核且仍在有效期内的货源信息。可按货种、运输类型、货量区间、发布方认证状态、港口和备注关键词进行筛选。"
+          description="浏览已审核发布且未过期的货源信息。可按货种、运输类型、货量区间、发布方认证状态、港口和备注关键词进行筛选。"
           actionHref="/publish-cargo"
           actionText="发布货源"
         />
@@ -564,8 +522,8 @@ export default function CargoPage() {
         </div>
 
         <div className="mb-4 text-sm text-slate-500">
-          共 {cargoList.length} 条有效货源，筛选后 {filteredCargoList.length} 条，
-          当前第 {safeCurrentPage} / {totalPages} 页。
+          共 {cargoList.length} 条未过期货源，筛选后 {filteredCargoList.length}{" "}
+          条，当前第 {safeCurrentPage} / {totalPages} 页。
         </div>
 
         {loading ? (
@@ -574,7 +532,7 @@ export default function CargoPage() {
           </div>
         ) : filteredCargoList.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            暂无符合条件的有效货源。
+            暂无符合条件的未过期货源。
           </div>
         ) : (
           <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -622,7 +580,9 @@ export default function CargoPage() {
                         </p>
                         <p>计划装货：{formatDate(item.planned_loading_date)}</p>
                         <p>期望船型：{item.expected_vessel_type}</p>
-                        <p>有效期至：{formatDate(item.information_expiry_date)}</p>
+                        <p>
+                          有效期至：{formatDate(item.information_expiry_date)}
+                        </p>
                       </div>
 
                       {currentUserId ? (
