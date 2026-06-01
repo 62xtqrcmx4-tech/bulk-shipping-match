@@ -162,12 +162,23 @@ export default function VesselsPage() {
   async function fetchVesselList() {
     setLoading(true);
 
+    const { error: expireError } = await supabase.rpc(
+      "expire_outdated_listings"
+    );
+
+    if (expireError) {
+      console.error("过期信息处理失败：", expireError);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
     const { data: vesselData, error: vesselError } = await supabase
       .from("vessel_supply")
       .select(
         "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
       )
       .eq("status", "published")
+      .gte("information_expiry_date", today)
       .order("created_at", { ascending: false });
 
     if (vesselError) {
@@ -357,6 +368,17 @@ export default function VesselsPage() {
       return false;
     }
 
+    if (vessel.status !== "published") {
+      alert("该船源当前不可联系。");
+      return false;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (vessel.information_expiry_date < today) {
+      alert("该船源已过期，不能申请联系。");
+      return false;
+    }
+
     if (!currentUserProfile) {
       alert("请先提交企业资料和营业执照后，再申请联系。");
       window.location.href = "/my-profile";
@@ -440,7 +462,7 @@ export default function VesselsPage() {
       <div className="mx-auto max-w-7xl">
         <PageHeader
           title="船源大厅"
-          description="浏览已审核发布的船源信息。可按船型、运输类型、运力单位、运力区间、发布方认证状态、区域和备注关键词进行筛选。"
+          description="浏览已审核发布且未过期的船源信息。可按船型、运输类型、运力单位、运力区间、发布方认证状态、区域和备注关键词进行筛选。"
           actionHref="/publish-vessel"
           actionText="发布船源"
         />
@@ -535,8 +557,9 @@ export default function VesselsPage() {
         </div>
 
         <div className="mb-4 text-sm text-slate-500">
-          共 {vesselList.length} 条船源，筛选后 {filteredVesselList.length} 条，
-          当前第 {safeCurrentPage} / {totalPages} 页。
+          共 {vesselList.length} 条未过期船源，筛选后{" "}
+          {filteredVesselList.length} 条，当前第 {safeCurrentPage} /{" "}
+          {totalPages} 页。
         </div>
 
         {loading ? (
@@ -545,7 +568,7 @@ export default function VesselsPage() {
           </div>
         ) : filteredVesselList.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            暂无符合条件的船源。
+            暂无符合条件的未过期船源。
           </div>
         ) : (
           <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
