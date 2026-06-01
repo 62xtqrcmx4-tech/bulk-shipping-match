@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "../../../lib/supabase";
-import PageHeader from "../../../components/PageHeader";
+import { supabase } from "../../lib/supabase";
+import PageHeader from "../../components/PageHeader";
 
 type VesselSupply = {
   id: string;
@@ -22,24 +22,25 @@ type VesselSupply = {
   acceptable_cargo_types: string[];
   information_expiry_date: string;
   status: string;
-  rejected_reason: string | null;
   remark: string | null;
   created_at: string;
 
   publisher_company_name?: string;
-  publisher_contact_name?: string;
-  publisher_contact_phone?: string;
-  publisher_contact_email?: string;
   publisher_verification_status?: string;
 };
 
 type CompanyProfile = {
   user_id: string;
   company_name: string;
-  contact_name: string;
-  contact_phone: string;
-  contact_email: string;
   verification_status: string;
+};
+
+type CurrentUserProfile = {
+  user_id: string;
+  company_name: string;
+  verification_status: string;
+  business_license_path: string | null;
+  rejected_reason: string | null;
 };
 
 function formatTransportType(type: string) {
@@ -51,7 +52,7 @@ function formatTransportType(type: string) {
 
 function formatStatus(status: string) {
   if (status === "pending") return "待审核";
-  if (status === "published") return "已发布 / 可联系";
+  if (status === "published") return "可联系";
   if (status === "completed") return "已完成";
   if (status === "closed") return "已关闭";
   if (status === "expired") return "已过期";
@@ -68,15 +69,31 @@ function formatCapacityUnit(unit: string | null) {
 }
 
 function formatVerificationStatus(status?: string) {
-  if (status === "pending") return "企业待认证";
-  if (status === "approved") return "企业已认证";
-  if (status === "rejected") return "企业认证驳回";
-  return "企业未认证";
+  if (status === "approved") return "已认证";
+  if (status === "pending") return "证照已提交，待审核";
+  if (status === "rejected") return "认证驳回";
+  return "未认证";
+}
+
+function getVerificationBadgeClass(status?: string) {
+  if (status === "approved") {
+    return "rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700";
+  }
+
+  if (status === "pending") {
+    return "rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700";
+  }
+
+  if (status === "rejected") {
+    return "rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-700";
+  }
+
+  return "rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600";
 }
 
 function formatDate(value: string | null) {
   if (!value) return "未记录";
-  return new Date(value).toLocaleString("zh-CN");
+  return new Date(value).toLocaleDateString("zh-CN");
 }
 
 function matchKeyword(
@@ -94,61 +111,74 @@ function matchKeyword(
     .includes(text);
 }
 
-export default function AdminVesselsPage() {
+export default function VesselsPage() {
   const [vesselList, setVesselList] = useState<VesselSupply[]>([]);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [currentUserProfile, setCurrentUserProfile] =
+    useState<CurrentUserProfile | null>(null);
+
+  const [transportTypeFilter, setTransportTypeFilter] = useState("all");
+  const [vesselTypeFilter, setVesselTypeFilter] = useState("all");
+  const [capacityUnitFilter, setCapacityUnitFilter] = useState("all");
+  const [publisherVerificationFilter, setPublisherVerificationFilter] =
+    useState("all");
+  const [minCapacity, setMinCapacity] = useState("");
+  const [maxCapacity, setMaxCapacity] = useState("");
   const [keyword, setKeyword] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const [loading, setLoading] = useState(true);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  async function fetchCurrentUserProfile() {
+    const { data: userData } = await supabase.auth.getUser();
 
-  async function checkAdminPermission() {
-    setCheckingAdmin(true);
-
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError || !userData.user) {
-      alert("请先登录后访问后台。");
-      window.location.href = "/login";
-      return false;
+    if (!userData.user) {
+      setCurrentUserId("");
+      setCurrentUserProfile(null);
+      return;
     }
 
-    const { data: profileData, error: profileError } = await supabase
+    setCurrentUserId(userData.user.id);
+
+    const { data, error } = await supabase
       .from("company_verification")
-      .select("is_admin")
+      .select(
+        "user_id, company_name, verification_status, business_license_path, rejected_reason"
+      )
       .eq("user_id", userData.user.id)
       .maybeSingle();
 
-    if (profileError) {
-      alert(`读取管理员权限失败：${profileError.message}`);
-      window.location.href = "/";
-      return false;
+    if (error || !data) {
+      setCurrentUserProfile(null);
+      return;
     }
 
-    if (!profileData || profileData.is_admin !== true) {
-      alert("无权限访问后台。");
-      window.location.href = "/";
-      return false;
-    }
-
-    setIsAdmin(true);
-    setCheckingAdmin(false);
-    return true;
+    setCurrentUserProfile(data as CurrentUserProfile);
   }
 
-  async function fetchVessels() {
+  async function fetchVesselList() {
     setLoading(true);
+
+    const { error: expireError } = await supabase.rpc(
+      "expire_outdated_listings"
+    );
+
+    if (expireError) {
+      console.error("过期信息处理失败：", expireError);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
 
     const { data: vesselData, error: vesselError } = await supabase
       .from("vessel_supply")
       .select(
-        "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, rejected_reason, remark, created_at"
+        "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
       )
+      .eq("status", "published")
+      .gte("information_expiry_date", today)
       .order("created_at", { ascending: false });
 
     if (vesselError) {
@@ -167,10 +197,8 @@ export default function AdminVesselsPage() {
 
     if (publisherIds.length > 0) {
       const { data: profileData, error: profileError } = await supabase
-        .from("company_verification")
-        .select(
-          "user_id, company_name, contact_name, contact_phone, contact_email, verification_status"
-        )
+        .from("public_company_profiles")
+        .select("user_id, company_name, verification_status")
         .in("user_id", publisherIds);
 
       if (!profileError) {
@@ -194,9 +222,6 @@ export default function AdminVesselsPage() {
       return {
         ...vessel,
         publisher_company_name: profile?.company_name || "",
-        publisher_contact_name: profile?.contact_name || "",
-        publisher_contact_phone: profile?.contact_phone || "",
-        publisher_contact_email: profile?.contact_email || "",
         publisher_verification_status: profile?.verification_status || "",
       };
     });
@@ -207,29 +232,76 @@ export default function AdminVesselsPage() {
 
   useEffect(() => {
     async function initPage() {
-      const allowed = await checkAdminPermission();
-
-      if (allowed) {
-        await fetchVessels();
-      }
+      await fetchCurrentUserProfile();
+      await fetchVesselList();
     }
 
     initPage();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async () => {
+      await fetchCurrentUserProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [keyword, statusFilter, pageSize]);
+  }, [
+    transportTypeFilter,
+    vesselTypeFilter,
+    capacityUnitFilter,
+    publisherVerificationFilter,
+    minCapacity,
+    maxCapacity,
+    keyword,
+    pageSize,
+  ]);
 
   const filteredVesselList = vesselList.filter((item) => {
-    const matchStatus =
-      statusFilter === "all"
+    const matchTransportType =
+      transportTypeFilter === "all"
         ? true
-        : statusFilter === "reviewed"
-          ? ["published", "completed", "closed", "rejected", "expired"].includes(
-              item.status
-            )
-          : item.status === statusFilter;
+        : item.transport_type === transportTypeFilter;
+
+    const matchVesselType =
+      vesselTypeFilter === "all" ? true : item.vessel_type === vesselTypeFilter;
+
+    const currentCapacityUnit = item.capacity_unit || "DWT";
+
+    const matchCapacityUnit =
+      capacityUnitFilter === "all"
+        ? true
+        : currentCapacityUnit === capacityUnitFilter;
+
+    const currentPublisherStatus = item.publisher_verification_status || "";
+
+    const matchPublisherVerification =
+      publisherVerificationFilter === "all"
+        ? true
+        : publisherVerificationFilter === "unverified"
+          ? currentPublisherStatus === ""
+          : currentPublisherStatus === publisherVerificationFilter;
+
+    const minCapacityValue =
+      minCapacity.trim() === "" ? null : Number(minCapacity);
+
+    const maxCapacityValue =
+      maxCapacity.trim() === "" ? null : Number(maxCapacity);
+
+    const matchMinCapacity =
+      minCapacityValue === null ||
+      Number.isNaN(minCapacityValue) ||
+      item.dwt >= minCapacityValue;
+
+    const matchMaxCapacity =
+      maxCapacityValue === null ||
+      Number.isNaN(maxCapacityValue) ||
+      item.dwt <= maxCapacityValue;
 
     const matchSearch = matchKeyword(keyword, [
       item.vessel_type,
@@ -245,19 +317,20 @@ export default function AdminVesselsPage() {
       Array.isArray(item.acceptable_cargo_types)
         ? item.acceptable_cargo_types.join(" ")
         : "",
-      item.information_expiry_date,
-      item.status,
-      item.rejected_reason,
       item.remark,
       item.publisher_company_name,
-      item.publisher_contact_name,
-      item.publisher_contact_phone,
-      item.publisher_contact_email,
       item.publisher_verification_status,
-      item.created_at,
     ]);
 
-    return matchStatus && matchSearch;
+    return (
+      matchTransportType &&
+      matchVesselType &&
+      matchCapacityUnit &&
+      matchPublisherVerification &&
+      matchMinCapacity &&
+      matchMaxCapacity &&
+      matchSearch
+    );
   });
 
   const totalPages = Math.max(
@@ -272,368 +345,417 @@ export default function AdminVesselsPage() {
     safeCurrentPage * pageSize
   );
 
-  async function approveVessel(id: string) {
-    setUpdatingId(id);
+  function resetFilters() {
+    setTransportTypeFilter("all");
+    setVesselTypeFilter("all");
+    setCapacityUnitFilter("all");
+    setPublisherVerificationFilter("all");
+    setMinCapacity("");
+    setMaxCapacity("");
+    setKeyword("");
+    setCurrentPage(1);
+  }
 
-    const { error } = await supabase
-      .from("vessel_supply")
-      .update({
-        status: "published",
-        rejected_reason: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
+  function validateCanRequestContact(vessel: VesselSupply) {
+    if (!currentUserId) {
+      alert("请先登录后申请联系。");
+      window.location.href = "/login";
+      return false;
+    }
 
-    setUpdatingId(null);
+    if (currentUserId === vessel.publisher_id) {
+      alert("不能申请联系自己发布的船源。");
+      return false;
+    }
+
+    if (vessel.status !== "published") {
+      alert("该船源当前不可联系。");
+      return false;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (vessel.information_expiry_date < today) {
+      alert("该船源已过期，不能申请联系。");
+      return false;
+    }
+
+    if (!currentUserProfile) {
+      alert("请先提交企业资料和营业执照后，再申请联系。");
+      window.location.href = "/my-profile";
+      return false;
+    }
+
+    if (!currentUserProfile.business_license_path) {
+      alert("请先上传营业执照或企业资质文件后，再申请联系。");
+      window.location.href = "/my-profile";
+      return false;
+    }
+
+    if (currentUserProfile.verification_status === "rejected") {
+      alert(
+        `企业认证已被驳回，暂不能申请联系。驳回原因：${
+          currentUserProfile.rejected_reason || "未填写"
+        }`
+      );
+      window.location.href = "/my-profile";
+      return false;
+    }
+
+    if (
+      currentUserProfile.verification_status !== "pending" &&
+      currentUserProfile.verification_status !== "approved"
+    ) {
+      alert("请先提交企业认证资料后，再申请联系。");
+      window.location.href = "/my-profile";
+      return false;
+    }
+
+    return true;
+  }
+
+  async function requestContact(vessel: VesselSupply) {
+    if (!validateCanRequestContact(vessel)) return;
+
+    setRequestingId(vessel.id);
+
+    const { data: existingData, error: existingError } = await supabase
+      .from("contact_request")
+      .select("id")
+      .eq("requester_id", currentUserId)
+      .eq("vessel_supply_id", vessel.id)
+      .maybeSingle();
+
+    if (existingError) {
+      setRequestingId(null);
+      alert(`检查联系申请失败：${existingError.message}`);
+      return;
+    }
+
+    if (existingData) {
+      setRequestingId(null);
+      alert("你已经申请联系过该船源。");
+      return;
+    }
+
+    const { error } = await supabase.from("contact_request").insert({
+      requester_id: currentUserId,
+      target_user_id: vessel.publisher_id,
+      cargo_demand_id: null,
+      vessel_supply_id: vessel.id,
+      request_type: "cargo_to_vessel",
+      status: "opened",
+      contact_opened_at: new Date().toISOString(),
+    });
+
+    setRequestingId(null);
 
     if (error) {
-      alert(`通过船源失败：${error.message}`);
+      const message = error.message || "";
+
+      if (
+        message.includes("unique_contact_requester_vessel") ||
+        message.includes("duplicate key value")
+      ) {
+        alert("你已经申请联系过该船源。");
+      } else {
+        alert(`申请联系失败：${message}`);
+      }
+
       return;
     }
 
-    await fetchVessels();
-  }
-
-  async function rejectVessel(id: string) {
-    const reason = window.prompt("请输入船源审核未通过原因：");
-
-    if (reason === null) return;
-
-    if (reason.trim() === "") {
-      alert("驳回原因不能为空。");
-      return;
-    }
-
-    setUpdatingId(id);
-
-    const { error } = await supabase
-      .from("vessel_supply")
-      .update({
-        status: "rejected",
-        rejected_reason: reason.trim(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-
-    setUpdatingId(null);
-
-    if (error) {
-      alert(`驳回船源失败：${error.message}`);
-      return;
-    }
-
-    await fetchVessels();
-  }
-
-  async function closeVessel(id: string) {
-    const confirmed = window.confirm("确认关闭该船源吗？");
-
-    if (!confirmed) return;
-
-    setUpdatingId(id);
-
-    const { error } = await supabase
-      .from("vessel_supply")
-      .update({
-        status: "closed",
-        rejected_reason: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-
-    setUpdatingId(null);
-
-    if (error) {
-      alert(`关闭船源失败：${error.message}`);
-      return;
-    }
-
-    await fetchVessels();
-  }
-
-  if (checkingAdmin) {
-    return (
-      <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
-        <div className="mx-auto max-w-7xl">
-          <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            正在校验管理员权限...
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
-        <div className="mx-auto max-w-7xl">
-          <div className="rounded-2xl bg-white p-8 text-center text-red-600 shadow-sm ring-1 ring-slate-200">
-            无权限访问后台。
-          </div>
-        </div>
-      </main>
-    );
+    alert("联系申请已提交。船方将在“我的船源”中看到你的企业联系方式。");
   }
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-7xl">
         <PageHeader
-          title="船源审核"
-          description="审核船源信息，支持状态筛选、关键词搜索、通过、驳回和关闭。"
+          title="船源大厅"
+          description="浏览已审核发布且未过期的船源信息。可按船型、运输类型、运力单位、运力区间、发布方认证状态、区域和备注关键词进行筛选。"
+          actionHref="/publish-vessel"
+          actionText="发布船源"
         />
 
-        <div className="mb-6 grid gap-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-[1fr_auto_auto_auto]">
+        <div className="mb-6 grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-9">
+          <select
+            value={transportTypeFilter}
+            onChange={(event) => setTransportTypeFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部运输类型</option>
+            <option value="domestic">内贸</option>
+            <option value="international">外贸</option>
+            <option value="both">均可</option>
+          </select>
+
+          <select
+            value={vesselTypeFilter}
+            onChange={(event) => setVesselTypeFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部船型</option>
+            <option value="散货船">散货船</option>
+            <option value="集装箱船">集装箱船</option>
+            <option value="多用途船">多用途船</option>
+            <option value="重大件船">重大件船</option>
+            <option value="杂货船">杂货船</option>
+            <option value="其他">其他</option>
+          </select>
+
+          <select
+            value={capacityUnitFilter}
+            onChange={(event) => setCapacityUnitFilter(event.target.value)}
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部运力单位</option>
+            <option value="DWT">DWT</option>
+            <option value="TEU">TEU</option>
+            <option value="CBM">CBM</option>
+            <option value="piece">件</option>
+            <option value="other">其他</option>
+          </select>
+
+          <select
+            value={publisherVerificationFilter}
+            onChange={(event) =>
+              setPublisherVerificationFilter(event.target.value)
+            }
+            className="rounded-xl border px-3 py-2"
+          >
+            <option value="all">全部认证状态</option>
+            <option value="approved">已认证发布方</option>
+            <option value="pending">待审核发布方</option>
+            <option value="rejected">认证驳回发布方</option>
+            <option value="unverified">未认证发布方</option>
+          </select>
+
+          <input
+            value={minCapacity}
+            onChange={(event) => setMinCapacity(event.target.value)}
+            type="number"
+            min="0"
+            step="1"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最小运力"
+          />
+
+          <input
+            value={maxCapacity}
+            onChange={(event) => setMaxCapacity(event.target.value)}
+            type="number"
+            min="0"
+            step="1"
+            className="rounded-xl border px-3 py-2"
+            placeholder="最大运力"
+          />
+
           <input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            className="rounded-xl border px-4 py-3 text-sm"
-            placeholder="搜索船型、区域、货种、发布方、联系人、电话、备注、驳回原因"
+            className="rounded-xl border px-3 py-2 md:col-span-2"
+            placeholder="关键词搜索：船型、区域、货种、备注"
           />
-
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border bg-white px-3 py-3 text-sm"
-          >
-            <option value="all">全部船源</option>
-            <option value="pending">待审核</option>
-            <option value="reviewed">已审核</option>
-            <option value="published">已发布 / 可联系</option>
-            <option value="closed">已关闭</option>
-            <option value="rejected">审核未通过</option>
-            <option value="expired">已过期</option>
-          </select>
 
           <button
             type="button"
-            onClick={() => {
-              setKeyword("");
-              setStatusFilter("all");
-              setCurrentPage(1);
-            }}
-            className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            onClick={resetFilters}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-white"
           >
             重置筛选
           </button>
+        </div>
 
-          <button
-            onClick={fetchVessels}
-            className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800"
-          >
-            刷新数据
-          </button>
+        <div className="mb-4 text-sm text-slate-500">
+          共 {vesselList.length} 条未过期船源，筛选后{" "}
+          {filteredVesselList.length} 条，当前第 {safeCurrentPage} /{" "}
+          {totalPages} 页。
         </div>
 
         {loading ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
-            正在读取船源数据...
+            正在读取船源信息...
+          </div>
+        ) : filteredVesselList.length === 0 ? (
+          <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
+            暂无符合条件的未过期船源。
           </div>
         ) : (
           <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <div className="mb-5">
-              <h2 className="text-2xl font-bold">船源列表</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                共 {vesselList.length} 条船源，筛选后{" "}
-                {filteredVesselList.length} 条，当前第 {safeCurrentPage} /{" "}
-                {totalPages} 页
-              </p>
+            <div className="grid gap-5">
+              {paginatedVesselList.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 p-5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <h2 className="text-xl font-bold">{item.vessel_type}</h2>
+
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                          {formatTransportType(item.transport_type)}
+                        </span>
+
+                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                          {formatStatus(item.status)}
+                        </span>
+
+                        {currentUserId ? (
+                          <span
+                            className={getVerificationBadgeClass(
+                              item.publisher_verification_status
+                            )}
+                          >
+                            发布方
+                            {formatVerificationStatus(
+                              item.publisher_verification_status
+                            )}
+                          </span>
+                        ) : null}
+
+                        {item.is_ballast_return ? (
+                          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                            返程空载
+                          </span>
+                        ) : null}
+
+                        {item.is_idle_slot ? (
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+                            空档船期
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-2 text-slate-600">
+                        当前港/区域：{item.current_port_or_area}
+                        {item.current_destination_port
+                          ? `；当前目的港：${item.current_destination_port}`
+                          : ""}
+                      </p>
+
+                      <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
+                        <p>
+                          运力规模：{item.dwt}{" "}
+                          {formatCapacityUnit(item.capacity_unit)}
+                        </p>
+                        <p>可用开始：{formatDate(item.available_start_date)}</p>
+                        <p>
+                          可用结束：
+                          {item.available_end_date
+                            ? formatDate(item.available_end_date)
+                            : "未填写"}
+                        </p>
+                        <p>
+                          有效期至：{formatDate(item.information_expiry_date)}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                        <p>服务区域：{item.service_area}</p>
+                        <p>常跑航线：{item.regular_route || "未填写"}</p>
+                        <p>
+                          可承运：
+                          {Array.isArray(item.acceptable_cargo_types)
+                            ? item.acceptable_cargo_types.join("、")
+                            : ""}
+                        </p>
+                      </div>
+
+                      {currentUserId ? (
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <p className="font-bold text-slate-800">发布方信息</p>
+                          <p className="mt-2">
+                            企业名称：
+                            {item.publisher_company_name || "未填写企业名称"}
+                          </p>
+                          <p className="mt-1">
+                            认证状态：
+                            {formatVerificationStatus(
+                              item.publisher_verification_status
+                            )}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
+                          登录后可查看发布方企业信息和认证状态。
+                        </div>
+                      )}
+
+                      {item.remark ? (
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <span className="font-medium text-slate-800">
+                            备注：
+                          </span>
+                          {item.remark}
+                        </div>
+                      ) : null}
+
+                      <p className="mt-3 text-xs text-slate-400">
+                        发布时间：{formatDate(item.created_at)}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => requestContact(item)}
+                        disabled={
+                          requestingId === item.id ||
+                          currentUserId === item.publisher_id
+                        }
+                        className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                      >
+                        {requestingId === item.id ? "申请中..." : "申请联系"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            {filteredVesselList.length === 0 ? (
-              <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
-                暂无符合条件的船源数据
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>每页显示</span>
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value))}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value={10}>10 条</option>
+                  <option value={20}>20 条</option>
+                  <option value={50}>50 条</option>
+                </select>
               </div>
-            ) : (
-              <>
-                <div className="grid gap-4">
-                  {paginatedVesselList.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-slate-200 p-5"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-3">
-                            <h3 className="text-lg font-bold">
-                              {item.vessel_type}
-                            </h3>
 
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                              {formatTransportType(item.transport_type)}
-                            </span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(1, prev - 1))
+                  }
+                  disabled={safeCurrentPage <= 1}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  上一页
+                </button>
 
-                            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
-                              {formatStatus(item.status)}
-                            </span>
+                <span className="text-sm text-slate-600">
+                  第 {safeCurrentPage} / {totalPages} 页
+                </span>
 
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
-                              {formatVerificationStatus(
-                                item.publisher_verification_status
-                              )}
-                            </span>
-
-                            {item.is_ballast_return ? (
-                              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                                返程空载
-                              </span>
-                            ) : null}
-
-                            {item.is_idle_slot ? (
-                              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs text-teal-700">
-                                空档船期
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <p className="mt-2 text-sm text-slate-600">
-                            当前港/区域：{item.current_port_or_area}
-                            {item.current_destination_port
-                              ? `；当前目的港：${item.current_destination_port}`
-                              : ""}
-                          </p>
-
-                          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
-                            <p>
-                              运力规模：{item.dwt}{" "}
-                              {formatCapacityUnit(item.capacity_unit)}
-                            </p>
-                            <p>可用开始：{item.available_start_date}</p>
-                            <p>
-                              可用结束：
-                              {item.available_end_date || "未填写"}
-                            </p>
-                            <p>有效期至：{item.information_expiry_date}</p>
-                          </div>
-
-                          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                            <p>服务区域：{item.service_area}</p>
-                            <p>常跑航线：{item.regular_route || "未填写"}</p>
-                            <p>
-                              可承运：
-                              {Array.isArray(item.acceptable_cargo_types)
-                                ? item.acceptable_cargo_types.join("、")
-                                : ""}
-                            </p>
-                          </div>
-
-                          <div className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                            <p className="font-bold text-slate-800">发布方</p>
-                            <div className="mt-2 grid gap-1 md:grid-cols-2">
-                              <p>
-                                企业：
-                                {item.publisher_company_name || "未填写"}
-                              </p>
-                              <p>
-                                联系人：
-                                {item.publisher_contact_name || "未填写"}
-                              </p>
-                              <p>
-                                电话：
-                                {item.publisher_contact_phone || "未填写"}
-                              </p>
-                              <p>
-                                邮箱：
-                                {item.publisher_contact_email || "未填写"}
-                              </p>
-                            </div>
-                          </div>
-
-                          {item.rejected_reason ? (
-                            <div className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700">
-                              审核未通过原因：{item.rejected_reason}
-                            </div>
-                          ) : null}
-
-                          {item.remark ? (
-                            <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
-                              备注：{item.remark}
-                            </div>
-                          ) : null}
-
-                          <p className="mt-3 text-xs text-slate-400">
-                            发布时间：{formatDate(item.created_at)}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => approveVessel(item.id)}
-                            disabled={updatingId === item.id}
-                            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-400"
-                          >
-                            通过
-                          </button>
-
-                          <button
-                            onClick={() => rejectVessel(item.id)}
-                            disabled={updatingId === item.id}
-                            className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:bg-slate-400"
-                          >
-                            驳回
-                          </button>
-
-                          <button
-                            onClick={() => closeVessel(item.id)}
-                            disabled={updatingId === item.id}
-                            className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-                          >
-                            关闭
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
-                  <div className="flex items-center gap-2 text-sm text-slate-600">
-                    <span>每页显示</span>
-                    <select
-                      value={pageSize}
-                      onChange={(event) =>
-                        setPageSize(Number(event.target.value))
-                      }
-                      className="rounded-xl border bg-white px-3 py-2 text-sm"
-                    >
-                      <option value={10}>10 条</option>
-                      <option value={20}>20 条</option>
-                      <option value={50}>50 条</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCurrentPage((prev) => Math.max(1, prev - 1))
-                      }
-                      disabled={safeCurrentPage <= 1}
-                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-                    >
-                      上一页
-                    </button>
-
-                    <span className="text-sm text-slate-600">
-                      第 {safeCurrentPage} / {totalPages} 页
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCurrentPage((prev) =>
-                          Math.min(totalPages, prev + 1)
-                        )
-                      }
-                      disabled={safeCurrentPage >= totalPages}
-                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-                    >
-                      下一页
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                  }
+                  disabled={safeCurrentPage >= totalPages}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
           </section>
         )}
       </div>
