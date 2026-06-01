@@ -118,6 +118,14 @@ export default function MyCargoPage() {
       return;
     }
 
+    const { error: expireError } = await supabase.rpc(
+      "expire_outdated_listings"
+    );
+
+    if (expireError) {
+      console.error("过期信息处理失败：", expireError);
+    }
+
     const userId = userData.user.id;
 
     const { data: cargoData, error: cargoError } = await supabase
@@ -567,6 +575,15 @@ export default function MyCargoPage() {
                       </div>
 
                       <div className="flex flex-wrap gap-2">
+                        {item.status !== "completed" ? (
+                          <a
+                            href={`/edit-cargo/${item.id}`}
+                            className="rounded-xl border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                          >
+                            编辑货源
+                          </a>
+                        ) : null}
+
                         <button
                           onClick={() => closeCargo(item.id)}
                           disabled={updatingId === item.id || !canOperate}
