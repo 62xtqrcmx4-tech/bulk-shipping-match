@@ -66,6 +66,14 @@ export default function AdminPage() {
   async function fetchStats() {
     setLoading(true);
 
+    const { error: expireError } = await supabase.rpc(
+      "expire_outdated_listings"
+    );
+
+    if (expireError) {
+      console.error("过期信息处理失败：", expireError);
+    }
+
     const [
       companyTotalResult,
       companyPendingResult,
@@ -84,9 +92,7 @@ export default function AdminPage() {
         .select("id", { count: "exact", head: true })
         .eq("verification_status", "pending"),
 
-      supabase
-        .from("cargo_demand")
-        .select("id", { count: "exact", head: true }),
+      supabase.from("cargo_demand").select("id", { count: "exact", head: true }),
 
       supabase
         .from("cargo_demand")
