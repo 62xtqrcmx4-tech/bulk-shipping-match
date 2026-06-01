@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
 import PageHeader from "../../components/PageHeader";
+
+const RouteMap = dynamic(() => import("../../components/RouteMap"), {
+  ssr: false,
+});
 
 type CargoDemand = {
   id: string;
@@ -350,6 +355,7 @@ export default function CargoPage() {
     }
 
     const today = new Date().toISOString().slice(0, 10);
+
     if (cargo.information_expiry_date < today) {
       alert("该货源已过期，不能申请联系。");
       return false;
@@ -426,7 +432,17 @@ export default function CargoPage() {
     setRequestingId(null);
 
     if (error) {
-      alert(`申请联系失败：${error.message}`);
+      const message = error.message || "";
+
+      if (
+        message.includes("unique_contact_requester_cargo") ||
+        message.includes("duplicate key value")
+      ) {
+        alert("你已经申请联系过该货源。");
+      } else {
+        alert(`申请联系失败：${message}`);
+      }
+
       return;
     }
 
@@ -542,8 +558,8 @@ export default function CargoPage() {
                   key={item.id}
                   className="rounded-2xl border border-slate-200 p-5"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-3">
                         <h2 className="text-xl font-bold">{item.cargo_type}</h2>
 
@@ -572,64 +588,116 @@ export default function CargoPage() {
                       <p className="mt-2 text-slate-600">
                         {item.loading_port} → {item.discharge_port}
                       </p>
+                    </div>
 
-                      <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
-                        <p>
-                          货量：{item.cargo_quantity}{" "}
-                          {formatCargoUnit(item.cargo_unit)}
-                        </p>
-                        <p>计划装货：{formatDate(item.planned_loading_date)}</p>
-                        <p>期望船型：{item.expected_vessel_type}</p>
-                        <p>
-                          有效期至：{formatDate(item.information_expiry_date)}
+                    <button
+                      onClick={() => requestContact(item)}
+                      disabled={
+                        requestingId === item.id ||
+                        currentUserId === item.publisher_id
+                      }
+                      className="shrink-0 rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                    >
+                      {requestingId === item.id ? "申请中..." : "申请联系"}
+                    </button>
+                  </div>
+
+                  <div
+                    className="mt-5 overflow-x-auto"
+                    style={{
+                      width: "100%",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "360px 760px",
+                        columnGap: "24px",
+                        alignItems: "start",
+                        minWidth: "1144px",
+                      }}
+                    >
+                      <div style={{ width: 360 }}>
+                        <div className="grid gap-2 text-sm text-slate-600">
+                          <p>
+                            货量：{item.cargo_quantity}{" "}
+                            {formatCargoUnit(item.cargo_unit)}
+                          </p>
+                          <p>
+                            计划装货：
+                            {formatDate(item.planned_loading_date)}
+                          </p>
+                          <p>期望船型：{item.expected_vessel_type}</p>
+                          <p>
+                            有效期至：
+                            {formatDate(item.information_expiry_date)}
+                          </p>
+                        </div>
+
+                        {currentUserId ? (
+                          <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <p className="font-bold text-slate-800">
+                              发布方信息
+                            </p>
+                            <p className="mt-2">
+                              企业名称：
+                              {item.publisher_company_name ||
+                                "未填写企业名称"}
+                            </p>
+                            <p className="mt-1">
+                              认证状态：
+                              {formatVerificationStatus(
+                                item.publisher_verification_status
+                              )}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
+                            登录后可查看发布方企业信息和认证状态。
+                          </div>
+                        )}
+
+                        {item.remark ? (
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <span className="font-medium text-slate-800">
+                              备注：
+                            </span>
+                            {item.remark}
+                          </div>
+                        ) : null}
+
+                        <p className="mt-3 text-xs text-slate-400">
+                          发布时间：{formatDate(item.created_at)}
                         </p>
                       </div>
 
-                      {currentUserId ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <p className="font-bold text-slate-800">发布方信息</p>
-                          <p className="mt-2">
-                            企业名称：
-                            {item.publisher_company_name || "未填写企业名称"}
-                          </p>
-                          <p className="mt-1">
-                            认证状态：
-                            {formatVerificationStatus(
-                              item.publisher_verification_status
-                            )}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
-                          登录后可查看发布方企业信息和认证状态。
-                        </div>
-                      )}
-
-                      {item.remark ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <span className="font-medium text-slate-800">
-                            备注：
-                          </span>
-                          {item.remark}
-                        </div>
-                      ) : null}
-
-                      <p className="mt-3 text-xs text-slate-400">
-                        发布时间：{formatDate(item.created_at)}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => requestContact(item)}
-                        disabled={
-                          requestingId === item.id ||
-                          currentUserId === item.publisher_id
-                        }
-                        className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                      <div
+                        className="rounded-2xl bg-slate-50 p-4"
+                        style={{
+                          width: 760,
+                        }}
                       >
-                        {requestingId === item.id ? "申请中..." : "申请联系"}
-                      </button>
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">
+                              航线示意图
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {item.loading_port} → {item.discharge_port}
+                            </p>
+                          </div>
+
+                          <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs text-slate-500 ring-1 ring-slate-200">
+                            高德地图示意
+                          </span>
+                        </div>
+
+                        <RouteMap
+                          loadPort={item.loading_port}
+                          dischargePort={item.discharge_port}
+                          height={230}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
