@@ -11,7 +11,7 @@ export default function SiteHeader() {
             DMU船货匹配平台
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            Bulk Shipping Match Platform
+            Shipping Match Platform
           </div>
         </a>
 
