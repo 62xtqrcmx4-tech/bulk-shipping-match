@@ -18,6 +18,9 @@ type RouteMapProps = {
   loadPort?: string | null;
   dischargePort?: string | null;
   height?: number;
+  fromLabel?: string;
+  toLabel?: string;
+  emptyText?: string;
 };
 
 function transformLat(x: number, y: number) {
@@ -107,10 +110,7 @@ function wgs84ToGcj02(lat: number, lng: number): [number, number] {
     (dLng * 180.0) /
     ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
 
-  const mgLat = lat + dLat;
-  const mgLng = lng + dLng;
-
-  return [mgLat, mgLng];
+  return [lat + dLat, lng + dLng];
 }
 
 function FitBounds({ points }: { points: [number, number][] }) {
@@ -138,7 +138,10 @@ function FitBounds({ points }: { points: [number, number][] }) {
 export default function RouteMap({
   loadPort,
   dischargePort,
-  height = 320,
+  height = 250,
+  fromLabel = "装货港",
+  toLabel = "卸货港",
+  emptyText = "暂未配置该航线的港口坐标，当前无法显示地图",
 }: RouteMapProps) {
   const from = findPortCoordinate(loadPort);
   const to = findPortCoordinate(dischargePort);
@@ -149,7 +152,7 @@ export default function RouteMap({
         className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-center text-sm text-slate-500"
         style={{ height, width: "100%" }}
       >
-        暂未配置该航线的港口坐标，当前无法显示地图
+        {emptyText}
       </div>
     );
   }
@@ -196,7 +199,7 @@ export default function RouteMap({
           >
             <Popup>
               <div>
-                <div className="font-semibold">装货港</div>
+                <div className="font-semibold">{fromLabel}</div>
                 <div>{from.name}</div>
               </div>
             </Popup>
@@ -215,7 +218,7 @@ export default function RouteMap({
           >
             <Popup>
               <div>
-                <div className="font-semibold">卸货港</div>
+                <div className="font-semibold">{toLabel}</div>
                 <div>{to.name}</div>
               </div>
             </Popup>
