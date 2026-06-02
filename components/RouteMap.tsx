@@ -9,7 +9,6 @@ import {
   MapContainer,
   Polyline,
   Popup,
-  TileLayer,
   useMap,
 } from "react-leaflet";
 import { findPortCoordinate } from "../lib/portCoordinates";
@@ -113,13 +112,37 @@ function wgs84ToGcj02(lat: number, lng: number): [number, number] {
   return [lat + dLat, lng + dLng];
 }
 
+function AmapTileLayer() {
+  const map = useMap();
+
+  useEffect(() => {
+    const tileLayer = L.tileLayer(
+      "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}",
+      {
+        subdomains: ["1", "2", "3", "4"],
+        attribution: "© 高德地图",
+        maxZoom: 18,
+        minZoom: 3,
+      }
+    );
+
+    tileLayer.addTo(map);
+
+    return () => {
+      tileLayer.removeFrom(map);
+    };
+  }, [map]);
+
+  return null;
+}
+
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
 
   useEffect(() => {
     if (points.length === 0) return;
 
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
       map.invalidateSize();
 
       if (points.length === 1) {
@@ -129,7 +152,11 @@ function FitBounds({ points }: { points: [number, number][] }) {
 
       const bounds = L.latLngBounds(points);
       map.fitBounds(bounds, { padding: [50, 50] });
-    }, 120);
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [map, points]);
 
   return null;
@@ -179,11 +206,7 @@ export default function RouteMap({
         scrollWheelZoom={false}
         attributionControl={true}
       >
-        <TileLayer
-          attribution="© 高德地图"
-          url="https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}"
-          subdomains={["1", "2", "3", "4"]}
-        />
+        <AmapTileLayer />
 
         <FitBounds points={points} />
 
