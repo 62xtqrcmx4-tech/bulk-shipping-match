@@ -48,21 +48,27 @@ type CurrentUserProfile = {
   rejected_reason: string | null;
 };
 
-async function runWithTimeout<T>(
-  task: () => Promise<T>,
+function runWithTimeout<T>(
+  task: () => PromiseLike<T>,
   timeoutMs: number,
   label: string
 ): Promise<T> {
-  return await Promise.race([
-    task(),
-    new Promise<T>((_, reject) => {
-      setTimeout(() => {
-        reject(
-          new Error(`${label} 请求超时，请检查线上 Supabase 连接或 RLS 策略。`)
-        );
-      }, timeoutMs);
-    }),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} 请求超时，请检查线上 Supabase 连接或 RLS 策略。`));
+    }, timeoutMs);
+
+    Promise.resolve(task()).then(
+      (result) => {
+        window.clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function formatTransportType(type: string) {
@@ -754,12 +760,7 @@ export default function VesselsPage() {
                     </button>
                   </div>
 
-                  <div
-                    className="mt-5 overflow-x-auto"
-                    style={{
-                      width: "100%",
-                    }}
-                  >
+                  <div className="mt-5 overflow-x-auto" style={{ width: "100%" }}>
                     <div
                       style={{
                         display: "grid",
@@ -837,9 +838,7 @@ export default function VesselsPage() {
 
                       <div
                         className="rounded-2xl bg-slate-50 p-4"
-                        style={{
-                          width: 760,
-                        }}
+                        style={{ width: 760 }}
                       >
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
