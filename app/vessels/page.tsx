@@ -48,26 +48,21 @@ type CurrentUserProfile = {
   rejected_reason: string | null;
 };
 
-function withTimeout<T>(
-  promise: Promise<T>,
+async function runWithTimeout<T>(
+  task: () => Promise<T>,
   timeoutMs: number,
   label: string
 ): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      reject(new Error(`${label} 请求超时，请检查线上 Supabase 连接或 RLS 策略。`));
-    }, timeoutMs);
-
-    promise
-      .then((result) => {
-        window.clearTimeout(timer);
-        resolve(result);
-      })
-      .catch((error) => {
-        window.clearTimeout(timer);
-        reject(error);
-      });
-  });
+  return await Promise.race([
+    task(),
+    new Promise<T>((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(`${label} 请求超时，请检查线上 Supabase 连接或 RLS 策略。`)
+        );
+      }, timeoutMs);
+    }),
+  ]);
 }
 
 function formatTransportType(type: string) {
@@ -169,38 +164,39 @@ export default function VesselsPage() {
   const [pageSize, setPageSize] = useState(10);
 
   async function fetchCurrentUserProfile() {
-    const { data: userData } = await withTimeout(
-      supabase.auth.getUser(),
+    const userResult = await runWithTimeout(
+      () => supabase.auth.getUser(),
       12000,
       "读取当前用户"
     );
 
-    if (!userData.user) {
+    if (!userResult.data.user) {
       setCurrentUserId("");
       setCurrentUserProfile(null);
       return;
     }
 
-    setCurrentUserId(userData.user.id);
+    setCurrentUserId(userResult.data.user.id);
 
-    const { data, error } = await withTimeout(
-      supabase
-        .from("company_verification")
-        .select(
-          "user_id, company_name, verification_status, business_license_path, rejected_reason"
-        )
-        .eq("user_id", userData.user.id)
-        .maybeSingle(),
+    const profileResult = await runWithTimeout(
+      () =>
+        supabase
+          .from("company_verification")
+          .select(
+            "user_id, company_name, verification_status, business_license_path, rejected_reason"
+          )
+          .eq("user_id", userResult.data.user.id)
+          .maybeSingle(),
       12000,
       "读取当前用户企业认证"
     );
 
-    if (error || !data) {
+    if (profileResult.error || !profileResult.data) {
       setCurrentUserProfile(null);
       return;
     }
 
-    setCurrentUserProfile(data as CurrentUserProfile);
+    setCurrentUserProfile(profileResult.data as CurrentUserProfile);
   }
 
   async function fetchVesselList() {
@@ -208,36 +204,37 @@ export default function VesselsPage() {
     setPageError("");
 
     try {
-      const { error: expireError } = await withTimeout(
-        supabase.rpc("expire_outdated_listings"),
+      const expireResult = await runWithTimeout(
+        () => supabase.rpc("expire_outdated_listings"),
         12000,
         "处理过期船源"
       );
 
-      if (expireError) {
-        console.error("过期信息处理失败：", expireError);
+      if (expireResult.error) {
+        console.error("过期信息处理失败：", expireResult.error);
       }
 
       const today = new Date().toISOString().slice(0, 10);
 
-      const { data: vesselData, error: vesselError } = await withTimeout(
-        supabase
-          .from("vessel_supply")
-          .select(
-            "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
-          )
-          .eq("status", "published")
-          .gte("information_expiry_date", today)
-          .order("created_at", { ascending: false }),
+      const vesselResult = await runWithTimeout(
+        () =>
+          supabase
+            .from("vessel_supply")
+            .select(
+              "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
+            )
+            .eq("status", "published")
+            .gte("information_expiry_date", today)
+            .order("created_at", { ascending: false }),
         15000,
         "读取船源列表"
       );
 
-      if (vesselError) {
-        throw new Error(`读取船源失败：${vesselError.message}`);
+      if (vesselResult.error) {
+        throw new Error(`读取船源失败：${vesselResult.error.message}`);
       }
 
-      const vessels = (vesselData || []) as VesselSupply[];
+      const vessels = (vesselResult.data || []) as VesselSupply[];
 
       if (vessels.length === 0) {
         setVesselList([]);
@@ -251,19 +248,20 @@ export default function VesselsPage() {
       let profiles: CompanyProfile[] = [];
 
       if (publisherIds.length > 0) {
-        const { data: profileData, error: profileError } = await withTimeout(
-          supabase
-            .from("public_company_profiles")
-            .select("user_id, company_name, verification_status")
-            .in("user_id", publisherIds),
+        const profileResult = await runWithTimeout(
+          () =>
+            supabase
+              .from("public_company_profiles")
+              .select("user_id, company_name, verification_status")
+              .in("user_id", publisherIds),
           15000,
           "读取船源发布方企业信息"
         );
 
-        if (profileError) {
-          console.error("读取发布方企业信息失败：", profileError);
+        if (profileResult.error) {
+          console.error("读取发布方企业信息失败：", profileResult.error);
         } else {
-          profiles = (profileData || []) as CompanyProfile[];
+          profiles = (profileResult.data || []) as CompanyProfile[];
         }
       }
 
@@ -502,43 +500,45 @@ export default function VesselsPage() {
     setRequestingId(vessel.id);
 
     try {
-      const { data: existingData, error: existingError } = await withTimeout(
-        supabase
-          .from("contact_request")
-          .select("id")
-          .eq("requester_id", currentUserId)
-          .eq("vessel_supply_id", vessel.id)
-          .maybeSingle(),
+      const existingResult = await runWithTimeout(
+        () =>
+          supabase
+            .from("contact_request")
+            .select("id")
+            .eq("requester_id", currentUserId)
+            .eq("vessel_supply_id", vessel.id)
+            .maybeSingle(),
         12000,
         "检查船源联系申请"
       );
 
-      if (existingError) {
-        alert(`检查联系申请失败：${existingError.message}`);
+      if (existingResult.error) {
+        alert(`检查联系申请失败：${existingResult.error.message}`);
         return;
       }
 
-      if (existingData) {
+      if (existingResult.data) {
         alert("你已经申请联系过该船源。");
         return;
       }
 
-      const { error } = await withTimeout(
-        supabase.from("contact_request").insert({
-          requester_id: currentUserId,
-          target_user_id: vessel.publisher_id,
-          cargo_demand_id: null,
-          vessel_supply_id: vessel.id,
-          request_type: "cargo_to_vessel",
-          status: "opened",
-          contact_opened_at: new Date().toISOString(),
-        }),
+      const insertResult = await runWithTimeout(
+        () =>
+          supabase.from("contact_request").insert({
+            requester_id: currentUserId,
+            target_user_id: vessel.publisher_id,
+            cargo_demand_id: null,
+            vessel_supply_id: vessel.id,
+            request_type: "cargo_to_vessel",
+            status: "opened",
+            contact_opened_at: new Date().toISOString(),
+          }),
         12000,
         "提交船源联系申请"
       );
 
-      if (error) {
-        const message = error.message || "";
+      if (insertResult.error) {
+        const message = insertResult.error.message || "";
 
         if (
           message.includes("unique_contact_requester_vessel") ||
