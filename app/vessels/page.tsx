@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
 import PageHeader from "../../components/PageHeader";
+
+const RouteMap = dynamic(() => import("../../components/RouteMap"), {
+  ssr: false,
+});
 
 type VesselSupply = {
   id: string;
@@ -42,6 +47,28 @@ type CurrentUserProfile = {
   business_license_path: string | null;
   rejected_reason: string | null;
 };
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} 请求超时，请检查线上 Supabase 连接或 RLS 策略。`));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        window.clearTimeout(timer);
+        resolve(result);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 function formatTransportType(type: string) {
   if (type === "domestic") return "内贸";
@@ -111,9 +138,18 @@ function matchKeyword(
     .includes(text);
 }
 
+function getMapTitle(vessel: VesselSupply) {
+  if (vessel.current_destination_port) {
+    return `${vessel.current_port_or_area} → ${vessel.current_destination_port}`;
+  }
+
+  return `当前位置：${vessel.current_port_or_area}`;
+}
+
 export default function VesselsPage() {
   const [vesselList, setVesselList] = useState<VesselSupply[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [requestingId, setRequestingId] = useState<string | null>(null);
 
   const [currentUserId, setCurrentUserId] = useState("");
@@ -133,7 +169,11 @@ export default function VesselsPage() {
   const [pageSize, setPageSize] = useState(10);
 
   async function fetchCurrentUserProfile() {
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await withTimeout(
+      supabase.auth.getUser(),
+      12000,
+      "读取当前用户"
+    );
 
     if (!userData.user) {
       setCurrentUserId("");
@@ -143,13 +183,17 @@ export default function VesselsPage() {
 
     setCurrentUserId(userData.user.id);
 
-    const { data, error } = await supabase
-      .from("company_verification")
-      .select(
-        "user_id, company_name, verification_status, business_license_path, rejected_reason"
-      )
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabase
+        .from("company_verification")
+        .select(
+          "user_id, company_name, verification_status, business_license_path, rejected_reason"
+        )
+        .eq("user_id", userData.user.id)
+        .maybeSingle(),
+      12000,
+      "读取当前用户企业认证"
+    );
 
     if (error || !data) {
       setCurrentUserProfile(null);
@@ -161,78 +205,112 @@ export default function VesselsPage() {
 
   async function fetchVesselList() {
     setLoading(true);
+    setPageError("");
 
-    const { error: expireError } = await supabase.rpc(
-      "expire_outdated_listings"
-    );
+    try {
+      const { error: expireError } = await withTimeout(
+        supabase.rpc("expire_outdated_listings"),
+        12000,
+        "处理过期船源"
+      );
 
-    if (expireError) {
-      console.error("过期信息处理失败：", expireError);
-    }
+      if (expireError) {
+        console.error("过期信息处理失败：", expireError);
+      }
 
-    const today = new Date().toISOString().slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
 
-    const { data: vesselData, error: vesselError } = await supabase
-      .from("vessel_supply")
-      .select(
-        "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
-      )
-      .eq("status", "published")
-      .gte("information_expiry_date", today)
-      .order("created_at", { ascending: false });
+      const { data: vesselData, error: vesselError } = await withTimeout(
+        supabase
+          .from("vessel_supply")
+          .select(
+            "id, publisher_id, transport_type, vessel_type, dwt, capacity_unit, current_port_or_area, current_destination_port, available_start_date, available_end_date, service_area, regular_route, is_ballast_return, is_idle_slot, acceptable_cargo_types, information_expiry_date, status, remark, created_at"
+          )
+          .eq("status", "published")
+          .gte("information_expiry_date", today)
+          .order("created_at", { ascending: false }),
+        15000,
+        "读取船源列表"
+      );
 
-    if (vesselError) {
-      alert(`读取船源失败：${vesselError.message}`);
+      if (vesselError) {
+        throw new Error(`读取船源失败：${vesselError.message}`);
+      }
+
+      const vessels = (vesselData || []) as VesselSupply[];
+
+      if (vessels.length === 0) {
+        setVesselList([]);
+        return;
+      }
+
+      const publisherIds = Array.from(
+        new Set(vessels.map((item) => item.publisher_id).filter(Boolean))
+      );
+
+      let profiles: CompanyProfile[] = [];
+
+      if (publisherIds.length > 0) {
+        const { data: profileData, error: profileError } = await withTimeout(
+          supabase
+            .from("public_company_profiles")
+            .select("user_id, company_name, verification_status")
+            .in("user_id", publisherIds),
+          15000,
+          "读取船源发布方企业信息"
+        );
+
+        if (profileError) {
+          console.error("读取发布方企业信息失败：", profileError);
+        } else {
+          profiles = (profileData || []) as CompanyProfile[];
+        }
+      }
+
+      const profileMap = new Map<string, CompanyProfile>();
+
+      profiles.forEach((profile) => {
+        if (!profileMap.has(profile.user_id)) {
+          profileMap.set(profile.user_id, profile);
+        }
+      });
+
+      const merged = vessels.map((vessel) => {
+        const profile = profileMap.get(vessel.publisher_id);
+
+        return {
+          ...vessel,
+          publisher_company_name: profile?.company_name || "",
+          publisher_verification_status: profile?.verification_status || "",
+        };
+      });
+
+      setVesselList(merged);
+    } catch (error) {
+      console.error("船源大厅读取失败：", error);
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "船源大厅读取失败，请稍后重试。";
+
+      setPageError(message);
+      setVesselList([]);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const vessels = (vesselData || []) as VesselSupply[];
-
-    const publisherIds = Array.from(
-      new Set(vessels.map((item) => item.publisher_id).filter(Boolean))
-    );
-
-    let profiles: CompanyProfile[] = [];
-
-    if (publisherIds.length > 0) {
-      const { data: profileData, error: profileError } = await supabase
-        .from("public_company_profiles")
-        .select("user_id, company_name, verification_status")
-        .in("user_id", publisherIds);
-
-      if (!profileError) {
-        profiles = (profileData || []) as CompanyProfile[];
-      } else {
-        console.error(profileError);
-      }
-    }
-
-    const profileMap = new Map<string, CompanyProfile>();
-
-    profiles.forEach((profile) => {
-      if (!profileMap.has(profile.user_id)) {
-        profileMap.set(profile.user_id, profile);
-      }
-    });
-
-    const merged = vessels.map((vessel) => {
-      const profile = profileMap.get(vessel.publisher_id);
-
-      return {
-        ...vessel,
-        publisher_company_name: profile?.company_name || "",
-        publisher_verification_status: profile?.verification_status || "",
-      };
-    });
-
-    setVesselList(merged);
-    setLoading(false);
   }
 
   useEffect(() => {
     async function initPage() {
-      await fetchCurrentUserProfile();
+      try {
+        await fetchCurrentUserProfile();
+      } catch (error) {
+        console.error("读取当前用户信息失败：", error);
+        setCurrentUserId("");
+        setCurrentUserProfile(null);
+      }
+
       await fetchVesselList();
     }
 
@@ -241,7 +319,11 @@ export default function VesselsPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async () => {
-      await fetchCurrentUserProfile();
+      try {
+        await fetchCurrentUserProfile();
+      } catch (error) {
+        console.error("登录状态变化后读取用户信息失败：", error);
+      }
     });
 
     return () => {
@@ -374,6 +456,7 @@ export default function VesselsPage() {
     }
 
     const today = new Date().toISOString().slice(0, 10);
+
     if (vessel.information_expiry_date < today) {
       alert("该船源已过期，不能申请联系。");
       return false;
@@ -418,43 +501,65 @@ export default function VesselsPage() {
 
     setRequestingId(vessel.id);
 
-    const { data: existingData, error: existingError } = await supabase
-      .from("contact_request")
-      .select("id")
-      .eq("requester_id", currentUserId)
-      .eq("vessel_supply_id", vessel.id)
-      .maybeSingle();
+    try {
+      const { data: existingData, error: existingError } = await withTimeout(
+        supabase
+          .from("contact_request")
+          .select("id")
+          .eq("requester_id", currentUserId)
+          .eq("vessel_supply_id", vessel.id)
+          .maybeSingle(),
+        12000,
+        "检查船源联系申请"
+      );
 
-    if (existingError) {
+      if (existingError) {
+        alert(`检查联系申请失败：${existingError.message}`);
+        return;
+      }
+
+      if (existingData) {
+        alert("你已经申请联系过该船源。");
+        return;
+      }
+
+      const { error } = await withTimeout(
+        supabase.from("contact_request").insert({
+          requester_id: currentUserId,
+          target_user_id: vessel.publisher_id,
+          cargo_demand_id: null,
+          vessel_supply_id: vessel.id,
+          request_type: "cargo_to_vessel",
+          status: "opened",
+          contact_opened_at: new Date().toISOString(),
+        }),
+        12000,
+        "提交船源联系申请"
+      );
+
+      if (error) {
+        const message = error.message || "";
+
+        if (
+          message.includes("unique_contact_requester_vessel") ||
+          message.includes("duplicate key value")
+        ) {
+          alert("你已经申请联系过该船源。");
+        } else {
+          alert(`申请联系失败：${message}`);
+        }
+
+        return;
+      }
+
+      alert("联系申请已提交。船方将在“我的船源”中看到你的企业联系方式。");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "申请联系失败，请稍后重试。";
+      alert(message);
+    } finally {
       setRequestingId(null);
-      alert(`检查联系申请失败：${existingError.message}`);
-      return;
     }
-
-    if (existingData) {
-      setRequestingId(null);
-      alert("你已经申请联系过该船源。");
-      return;
-    }
-
-    const { error } = await supabase.from("contact_request").insert({
-      requester_id: currentUserId,
-      target_user_id: vessel.publisher_id,
-      cargo_demand_id: null,
-      vessel_supply_id: vessel.id,
-      request_type: "cargo_to_vessel",
-      status: "opened",
-      contact_opened_at: new Date().toISOString(),
-    });
-
-    setRequestingId(null);
-
-    if (error) {
-      alert(`申请联系失败：${error.message}`);
-      return;
-    }
-
-    alert("联系申请已提交。船方将在“我的船源”中看到你的企业联系方式。");
   }
 
   return (
@@ -566,6 +671,17 @@ export default function VesselsPage() {
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
             正在读取船源信息...
           </div>
+        ) : pageError ? (
+          <div className="rounded-2xl bg-red-50 p-8 text-center text-red-700 shadow-sm ring-1 ring-red-100">
+            <p className="font-semibold">船源信息读取失败</p>
+            <p className="mt-2 text-sm">{pageError}</p>
+            <button
+              onClick={fetchVesselList}
+              className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              重新读取
+            </button>
+          </div>
         ) : filteredVesselList.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
             暂无符合条件的未过期船源。
@@ -578,10 +694,12 @@ export default function VesselsPage() {
                   key={item.id}
                   className="rounded-2xl border border-slate-200 p-5"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-3">
-                        <h2 className="text-xl font-bold">{item.vessel_type}</h2>
+                        <h2 className="text-xl font-bold">
+                          {item.vessel_type}
+                        </h2>
 
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
                           {formatTransportType(item.transport_type)}
@@ -618,85 +736,135 @@ export default function VesselsPage() {
                       </div>
 
                       <p className="mt-2 text-slate-600">
-                        当前港/区域：{item.current_port_or_area}
                         {item.current_destination_port
-                          ? `；当前目的港：${item.current_destination_port}`
-                          : ""}
-                      </p>
-
-                      <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-4">
-                        <p>
-                          运力规模：{item.dwt}{" "}
-                          {formatCapacityUnit(item.capacity_unit)}
-                        </p>
-                        <p>可用开始：{formatDate(item.available_start_date)}</p>
-                        <p>
-                          可用结束：
-                          {item.available_end_date
-                            ? formatDate(item.available_end_date)
-                            : "未填写"}
-                        </p>
-                        <p>
-                          有效期至：{formatDate(item.information_expiry_date)}
-                        </p>
-                      </div>
-
-                      <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                        <p>服务区域：{item.service_area}</p>
-                        <p>常跑航线：{item.regular_route || "未填写"}</p>
-                        <p>
-                          可承运：
-                          {Array.isArray(item.acceptable_cargo_types)
-                            ? item.acceptable_cargo_types.join("、")
-                            : ""}
-                        </p>
-                      </div>
-
-                      {currentUserId ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <p className="font-bold text-slate-800">发布方信息</p>
-                          <p className="mt-2">
-                            企业名称：
-                            {item.publisher_company_name || "未填写企业名称"}
-                          </p>
-                          <p className="mt-1">
-                            认证状态：
-                            {formatVerificationStatus(
-                              item.publisher_verification_status
-                            )}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
-                          登录后可查看发布方企业信息和认证状态。
-                        </div>
-                      )}
-
-                      {item.remark ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                          <span className="font-medium text-slate-800">
-                            备注：
-                          </span>
-                          {item.remark}
-                        </div>
-                      ) : null}
-
-                      <p className="mt-3 text-xs text-slate-400">
-                        发布时间：{formatDate(item.created_at)}
+                          ? `${item.current_port_or_area} → ${item.current_destination_port}`
+                          : `当前位置：${item.current_port_or_area}`}
                       </p>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => requestContact(item)}
-                        disabled={
-                          requestingId === item.id ||
-                          currentUserId === item.publisher_id
-                        }
-                        className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                    <button
+                      onClick={() => requestContact(item)}
+                      disabled={
+                        requestingId === item.id ||
+                        currentUserId === item.publisher_id
+                      }
+                      className="shrink-0 rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                    >
+                      {requestingId === item.id ? "申请中..." : "申请联系"}
+                    </button>
+                  </div>
+
+                  <div
+                    className="mt-5 overflow-x-auto"
+                    style={{
+                      width: "100%",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "360px 760px",
+                        columnGap: "24px",
+                        alignItems: "start",
+                        minWidth: "1144px",
+                      }}
+                    >
+                      <div style={{ width: 360 }}>
+                        <div className="grid gap-2 text-sm text-slate-600">
+                          <p>
+                            运力规模：{item.dwt}{" "}
+                            {formatCapacityUnit(item.capacity_unit)}
+                          </p>
+                          <p>
+                            可用开始：{formatDate(item.available_start_date)}
+                          </p>
+                          <p>
+                            可用结束：
+                            {item.available_end_date
+                              ? formatDate(item.available_end_date)
+                              : "未填写"}
+                          </p>
+                          <p>
+                            有效期至：
+                            {formatDate(item.information_expiry_date)}
+                          </p>
+                          <p>服务区域：{item.service_area}</p>
+                          <p>常跑航线：{item.regular_route || "未填写"}</p>
+                          <p>
+                            可承运：
+                            {Array.isArray(item.acceptable_cargo_types)
+                              ? item.acceptable_cargo_types.join("、")
+                              : ""}
+                          </p>
+                        </div>
+
+                        {currentUserId ? (
+                          <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <p className="font-bold text-slate-800">
+                              发布方信息
+                            </p>
+                            <p className="mt-2">
+                              企业名称：
+                              {item.publisher_company_name ||
+                                "未填写企业名称"}
+                            </p>
+                            <p className="mt-1">
+                              认证状态：
+                              {formatVerificationStatus(
+                                item.publisher_verification_status
+                              )}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
+                            登录后可查看发布方企业信息和认证状态。
+                          </div>
+                        )}
+
+                        {item.remark ? (
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                            <span className="font-medium text-slate-800">
+                              备注：
+                            </span>
+                            {item.remark}
+                          </div>
+                        ) : null}
+
+                        <p className="mt-3 text-xs text-slate-400">
+                          发布时间：{formatDate(item.created_at)}
+                        </p>
+                      </div>
+
+                      <div
+                        className="rounded-2xl bg-slate-50 p-4"
+                        style={{
+                          width: 760,
+                        }}
                       >
-                        {requestingId === item.id ? "申请中..." : "申请联系"}
-                      </button>
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">
+                              船舶位置示意图
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {getMapTitle(item)}
+                            </p>
+                          </div>
+
+                          <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs text-slate-500 ring-1 ring-slate-200">
+                            高德地图示意
+                          </span>
+                        </div>
+
+                        <RouteMap
+                          loadPort={item.current_port_or_area}
+                          dischargePort={item.current_destination_port}
+                          height={250}
+                          fromLabel="当前位置"
+                          toLabel="目的港"
+                          emptyText="暂未配置该船源位置坐标，当前无法显示地图"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
