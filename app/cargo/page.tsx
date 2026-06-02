@@ -43,6 +43,29 @@ type CurrentUserProfile = {
   rejected_reason: string | null;
 };
 
+function runWithTimeout<T>(
+  task: () => PromiseLike<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} 请求超时，请检查线上 Supabase 连接或 RLS 策略。`));
+    }, timeoutMs);
+
+    Promise.resolve(task()).then(
+      (result) => {
+        window.clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 function formatTransportType(type: string) {
   if (type === "domestic") return "内贸";
   if (type === "international") return "外贸";
@@ -115,6 +138,7 @@ function matchKeyword(
 export default function CargoPage() {
   const [cargoList, setCargoList] = useState<CargoDemand[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [requestingId, setRequestingId] = useState<string | null>(null);
 
   const [currentUserId, setCurrentUserId] = useState("");
@@ -133,106 +157,153 @@ export default function CargoPage() {
   const [pageSize, setPageSize] = useState(10);
 
   async function fetchCurrentUserProfile() {
-    const { data: userData } = await supabase.auth.getUser();
+    const userResult = await runWithTimeout(
+      () => supabase.auth.getUser(),
+      12000,
+      "读取当前用户"
+    );
 
-    if (!userData.user) {
+    const currentUser = userResult.data.user;
+
+    if (!currentUser) {
       setCurrentUserId("");
       setCurrentUserProfile(null);
       return;
     }
 
-    setCurrentUserId(userData.user.id);
+    setCurrentUserId(currentUser.id);
 
-    const { data, error } = await supabase
-      .from("company_verification")
-      .select(
-        "user_id, company_name, verification_status, business_license_path, rejected_reason"
-      )
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
+    const profileResult = await runWithTimeout(
+      () =>
+        supabase
+          .from("company_verification")
+          .select(
+            "user_id, company_name, verification_status, business_license_path, rejected_reason"
+          )
+          .eq("user_id", currentUser.id)
+          .maybeSingle(),
+      12000,
+      "读取当前用户企业认证"
+    );
 
-    if (error || !data) {
+    if (profileResult.error || !profileResult.data) {
       setCurrentUserProfile(null);
       return;
     }
 
-    setCurrentUserProfile(data as CurrentUserProfile);
+    setCurrentUserProfile(profileResult.data as CurrentUserProfile);
   }
 
   async function fetchCargoList() {
     setLoading(true);
+    setPageError("");
 
-    const { error: expireError } = await supabase.rpc(
-      "expire_outdated_listings"
-    );
+    try {
+      const expireResult = await runWithTimeout(
+        () => supabase.rpc("expire_outdated_listings"),
+        12000,
+        "处理过期货源"
+      );
 
-    if (expireError) {
-      console.error("过期信息处理失败：", expireError);
-    }
+      if (expireResult.error) {
+        console.error("过期信息处理失败：", expireResult.error);
+      }
 
-    const today = new Date().toISOString().slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
 
-    const { data: cargoData, error: cargoError } = await supabase
-      .from("cargo_demand")
-      .select(
-        "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, remark, created_at"
-      )
-      .eq("status", "published")
-      .gte("information_expiry_date", today)
-      .order("created_at", { ascending: false });
+      const cargoResult = await runWithTimeout(
+        () =>
+          supabase
+            .from("cargo_demand")
+            .select(
+              "id, publisher_id, transport_type, cargo_type, cargo_quantity, cargo_unit, loading_port, discharge_port, planned_loading_date, expected_vessel_type, information_expiry_date, status, remark, created_at"
+            )
+            .eq("status", "published")
+            .gte("information_expiry_date", today)
+            .order("created_at", { ascending: false }),
+        15000,
+        "读取货源列表"
+      );
 
-    if (cargoError) {
-      alert(`读取货源失败：${cargoError.message}`);
+      if (cargoResult.error) {
+        throw new Error(`读取货源失败：${cargoResult.error.message}`);
+      }
+
+      const cargos = (cargoResult.data || []) as CargoDemand[];
+
+      if (cargos.length === 0) {
+        setCargoList([]);
+        return;
+      }
+
+      const publisherIds = Array.from(
+        new Set(cargos.map((item) => item.publisher_id).filter(Boolean))
+      );
+
+      let profiles: CompanyProfile[] = [];
+
+      if (publisherIds.length > 0) {
+        const profileResult = await runWithTimeout(
+          () =>
+            supabase
+              .from("public_company_profiles")
+              .select("user_id, company_name, verification_status")
+              .in("user_id", publisherIds),
+          15000,
+          "读取货源发布方企业信息"
+        );
+
+        if (profileResult.error) {
+          console.error("读取发布方企业信息失败：", profileResult.error);
+        } else {
+          profiles = (profileResult.data || []) as CompanyProfile[];
+        }
+      }
+
+      const profileMap = new Map<string, CompanyProfile>();
+
+      profiles.forEach((profile) => {
+        if (!profileMap.has(profile.user_id)) {
+          profileMap.set(profile.user_id, profile);
+        }
+      });
+
+      const merged = cargos.map((cargo) => {
+        const profile = profileMap.get(cargo.publisher_id);
+
+        return {
+          ...cargo,
+          publisher_company_name: profile?.company_name || "",
+          publisher_verification_status: profile?.verification_status || "",
+        };
+      });
+
+      setCargoList(merged);
+    } catch (error) {
+      console.error("货源大厅读取失败：", error);
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "货源大厅读取失败，请稍后重试。";
+
+      setPageError(message);
+      setCargoList([]);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const cargos = (cargoData || []) as CargoDemand[];
-
-    const publisherIds = Array.from(
-      new Set(cargos.map((item) => item.publisher_id).filter(Boolean))
-    );
-
-    let profiles: CompanyProfile[] = [];
-
-    if (publisherIds.length > 0) {
-      const { data: profileData, error: profileError } = await supabase
-        .from("public_company_profiles")
-        .select("user_id, company_name, verification_status")
-        .in("user_id", publisherIds);
-
-      if (!profileError) {
-        profiles = (profileData || []) as CompanyProfile[];
-      } else {
-        console.error(profileError);
-      }
-    }
-
-    const profileMap = new Map<string, CompanyProfile>();
-
-    profiles.forEach((profile) => {
-      if (!profileMap.has(profile.user_id)) {
-        profileMap.set(profile.user_id, profile);
-      }
-    });
-
-    const merged = cargos.map((cargo) => {
-      const profile = profileMap.get(cargo.publisher_id);
-
-      return {
-        ...cargo,
-        publisher_company_name: profile?.company_name || "",
-        publisher_verification_status: profile?.verification_status || "",
-      };
-    });
-
-    setCargoList(merged);
-    setLoading(false);
   }
 
   useEffect(() => {
     async function initPage() {
-      await fetchCurrentUserProfile();
+      try {
+        await fetchCurrentUserProfile();
+      } catch (error) {
+        console.error("读取当前用户信息失败：", error);
+        setCurrentUserId("");
+        setCurrentUserProfile(null);
+      }
+
       await fetchCargoList();
     }
 
@@ -241,7 +312,11 @@ export default function CargoPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async () => {
-      await fetchCurrentUserProfile();
+      try {
+        await fetchCurrentUserProfile();
+      } catch (error) {
+        console.error("登录状态变化后读取用户信息失败：", error);
+      }
     });
 
     return () => {
@@ -400,53 +475,67 @@ export default function CargoPage() {
 
     setRequestingId(cargo.id);
 
-    const { data: existingData, error: existingError } = await supabase
-      .from("contact_request")
-      .select("id")
-      .eq("requester_id", currentUserId)
-      .eq("cargo_demand_id", cargo.id)
-      .maybeSingle();
+    try {
+      const existingResult = await runWithTimeout(
+        () =>
+          supabase
+            .from("contact_request")
+            .select("id")
+            .eq("requester_id", currentUserId)
+            .eq("cargo_demand_id", cargo.id)
+            .maybeSingle(),
+        12000,
+        "检查货源联系申请"
+      );
 
-    if (existingError) {
-      setRequestingId(null);
-      alert(`检查联系申请失败：${existingError.message}`);
-      return;
-    }
-
-    if (existingData) {
-      setRequestingId(null);
-      alert("你已经申请联系过该货源。");
-      return;
-    }
-
-    const { error } = await supabase.from("contact_request").insert({
-      requester_id: currentUserId,
-      target_user_id: cargo.publisher_id,
-      cargo_demand_id: cargo.id,
-      vessel_supply_id: null,
-      request_type: "vessel_to_cargo",
-      status: "opened",
-      contact_opened_at: new Date().toISOString(),
-    });
-
-    setRequestingId(null);
-
-    if (error) {
-      const message = error.message || "";
-
-      if (
-        message.includes("unique_contact_requester_cargo") ||
-        message.includes("duplicate key value")
-      ) {
-        alert("你已经申请联系过该货源。");
-      } else {
-        alert(`申请联系失败：${message}`);
+      if (existingResult.error) {
+        alert(`检查联系申请失败：${existingResult.error.message}`);
+        return;
       }
 
-      return;
-    }
+      if (existingResult.data) {
+        alert("你已经申请联系过该货源。");
+        return;
+      }
 
-    alert("联系申请已提交。货方将在“我的货源”中看到你的企业联系方式。");
+      const insertResult = await runWithTimeout(
+        () =>
+          supabase.from("contact_request").insert({
+            requester_id: currentUserId,
+            target_user_id: cargo.publisher_id,
+            cargo_demand_id: cargo.id,
+            vessel_supply_id: null,
+            request_type: "vessel_to_cargo",
+            status: "opened",
+            contact_opened_at: new Date().toISOString(),
+          }),
+        12000,
+        "提交货源联系申请"
+      );
+
+      if (insertResult.error) {
+        const message = insertResult.error.message || "";
+
+        if (
+          message.includes("unique_contact_requester_cargo") ||
+          message.includes("duplicate key value")
+        ) {
+          alert("你已经申请联系过该货源。");
+        } else {
+          alert(`申请联系失败：${message}`);
+        }
+
+        return;
+      }
+
+      alert("联系申请已提交。货方将在“我的货源”中看到你的企业联系方式。");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "申请联系失败，请稍后重试。";
+      alert(message);
+    } finally {
+      setRequestingId(null);
+    }
   }
 
   return (
@@ -546,6 +635,17 @@ export default function CargoPage() {
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
             正在读取货源信息...
           </div>
+        ) : pageError ? (
+          <div className="rounded-2xl bg-red-50 p-8 text-center text-red-700 shadow-sm ring-1 ring-red-100">
+            <p className="font-semibold">货源信息读取失败</p>
+            <p className="mt-2 text-sm">{pageError}</p>
+            <button
+              onClick={fetchCargoList}
+              className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              重新读取
+            </button>
+          </div>
         ) : filteredCargoList.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm ring-1 ring-slate-200">
             暂无符合条件的未过期货源。
@@ -602,12 +702,7 @@ export default function CargoPage() {
                     </button>
                   </div>
 
-                  <div
-                    className="mt-5 overflow-x-auto"
-                    style={{
-                      width: "100%",
-                    }}
-                  >
+                  <div className="mt-5 overflow-x-auto" style={{ width: "100%" }}>
                     <div
                       style={{
                         display: "grid",
@@ -673,9 +768,7 @@ export default function CargoPage() {
 
                       <div
                         className="rounded-2xl bg-slate-50 p-4"
-                        style={{
-                          width: 760,
-                        }}
+                        style={{ width: 760 }}
                       >
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
@@ -695,7 +788,10 @@ export default function CargoPage() {
                         <RouteMap
                           loadPort={item.loading_port}
                           dischargePort={item.discharge_port}
-                          height={230}
+                          height={250}
+                          fromLabel="装货港"
+                          toLabel="卸货港"
+                          emptyText="暂未配置该航线的港口坐标，当前无法显示地图"
                         />
                       </div>
                     </div>
