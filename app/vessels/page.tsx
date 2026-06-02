@@ -176,13 +176,15 @@ export default function VesselsPage() {
       "读取当前用户"
     );
 
-    if (!userResult.data.user) {
+    const currentUser = userResult.data.user;
+
+    if (!currentUser) {
       setCurrentUserId("");
       setCurrentUserProfile(null);
       return;
     }
 
-    setCurrentUserId(userResult.data.user.id);
+    setCurrentUserId(currentUser.id);
 
     const profileResult = await runWithTimeout(
       () =>
@@ -191,7 +193,7 @@ export default function VesselsPage() {
           .select(
             "user_id, company_name, verification_status, business_license_path, rejected_reason"
           )
-          .eq("user_id", userResult.data.user.id)
+          .eq("user_id", currentUser.id)
           .maybeSingle(),
       12000,
       "读取当前用户企业认证"
